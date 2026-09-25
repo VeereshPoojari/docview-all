@@ -1,0 +1,118 @@
+{
+  "name": "docview-all",
+  "version": "1.0.0",
+  "description": "Universal, modern zero-dependency document and file viewer engine for all JavaScript frameworks and platforms (React, Vue, Angular, React Native, Svelte, Next.js, Vanilla). Supports 67+ formats including PDF, DOCX, XLSX, CSV, Draw.io (.drawio), Video with DASH/HLS, Audio, Code, Text & Images.",
+  "type": "module",
+  "main": "dist/index.js",
+  "module": "dist/index.esm.js",
+  "unpkg": "dist/index.umd.js",
+  "jsdelivr": "dist/index.umd.js",
+  "types": "dist/types/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/index.esm.js",
+      "require": "./dist/index.js",
+      "default": "./dist/index.esm.js"
+    },
+    "./react": {
+      "types": "./dist/react/index.d.ts",
+      "import": "./dist/react/index.esm.js",
+      "require": "./dist/react/index.js",
+      "default": "./dist/react/index.esm.js"
+    },
+    "./vue": {
+      "types": "./dist/vue/index.d.ts",
+      "import": "./dist/vue/index.esm.js",
+      "require": "./dist/vue/index.js",
+      "default": "./dist/vue/index.esm.js"
+    },
+    "./angular": {
+      "types": "./dist/angular/index.d.ts",
+      "import": "./dist/angular/index.esm.js",
+      "require": "./dist/angular/index.js",
+      "default": "./dist/angular/index.esm.js"
+    },
+    "./react-native": {
+      "types": "./dist/react-native/index.d.ts",
+      "import": "./dist/react-native/index.esm.js",
+      "require": "./dist/react-native/index.js",
+      "default": "./dist/react-native/index.esm.js"
+    },
+    "./css": "./dist/docview-all.css",
+    "./package.json": "./package.json"
+  },
+  "typesVersions": {
+    "*": {
+      "react": [
+        "dist/react/index.d.ts",
+        "src/react/index.d.ts"
+      ],
+      "vue": [
+        "dist/vue/index.d.ts",
+        "src/vue/index.d.ts"
+      ],
+      "angular": [
+        "dist/angular/index.d.ts",
+        "src/angular/index.d.ts"
+      ],
+      "react-native": [
+        "dist/react-native/index.d.ts",
+        "src/react-native/index.d.ts"
+      ],
+      "*": [
+        "dist/types/*",
+        "src/types/*"
+      ]
+    }
+  },
+  "files": [
+    "dist",
+    "src",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=12.0.0"
+  },
+  "scripts": {
+    "build": "rollup -c",
+    "dev": "rollup -c -w",
+    "test": "node tests/engines.test.js"
+  },
+  "keywords": [
+    "docview-all",
+    "document-viewer",
+    "pdf-viewer",
+    "docx-viewer",
+    "excel-viewer",
+    "xlsx-viewer",
+    "csv-viewer",
+    "react-doc-viewer",
+    "vue-document-viewer",
+    "universal-viewer",
+    "file-viewer",
+    "code-viewer",
+    "video-streamer",
+    "dash-player",
+    "react-native-doc-viewer",
+    "zero-dependency",
+    "cross-platform"
+  ],
+  "author": "Veeresh Poojari <veeresh.maps@gmail.com> (https://github.com/VeereshMaps)",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/VeereshMaps/docview-all.git"
+  },
+  "bugs": {
+    "url": "https://github.com/VeereshMaps/docview-all/issues"
+  },
+  "homepage": "https://veereshmaps.github.io/docview-all/",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@rollup/plugin-commonjs": "^25.0.7",
+    "@rollup/plugin-node-resolve": "^15.2.3",
+    "@rollup/plugin-terser": "^0.4.4",
+    "rollup": "^4.9.6",
+    "rollup-plugin-postcss": "^4.0.2"
+  }
+}

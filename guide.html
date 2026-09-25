@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DocView-All 📄 | Framework Integration & Code Guide</title>
+  <link rel="stylesheet" href="./src/styles/docview-all.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #07090e;
+      --card-bg: rgba(13, 18, 30, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --primary: #3b82f6;
+      --primary-glow: rgba(59, 130, 246, 0.35);
+      --accent: #10b981;
+      --text-main: #f3f4f6;
+      --text-muted: #94a3b8;
+    }
+
+    /* Light Mode */
+    body.light-theme {
+      --bg-dark: #f8fafc;
+      --card-bg: #ffffff;
+      --card-border: #e2e8f0;
+      --primary: #2563eb;
+      --primary-glow: rgba(37, 99, 235, 0.2);
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.08) 0px, transparent 50%);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      transition: background-color 0.25s ease, color 0.25s ease;
+    }
+
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px 32px;
+      height: 58px;
+      border-bottom: 1px solid var(--card-border);
+      backdrop-filter: blur(12px);
+      background: rgba(7, 9, 14, 0.9);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+    }
+
+    body.light-theme header {
+      background: rgba(255, 255, 255, 0.9);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: var(--text-main);
+    }
+
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #3b82f6, #06b6d4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      box-shadow: 0 0 16px var(--primary-glow);
+    }
+
+    .brand-name {
+      font-size: 18px;
+      font-weight: 800;
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .nav-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      color: var(--text-muted);
+      border: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.03);
+      cursor: pointer;
+    }
+
+    .nav-btn:hover {
+      color: var(--text-main);
+      border-color: rgba(255, 255, 255, 0.25);
+    }
+
+    .nav-btn-primary {
+      background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
+      color: #ffffff !important;
+      border: none !important;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35);
+      font-weight: 700;
+    }
+
+    body.light-theme .nav-btn:not(.nav-btn-primary) {
+      color: #334155;
+      border-color: #cbd5e1;
+      background: rgba(0, 0, 0, 0.03);
+    }
+
+    .theme-toggle-btn {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      justify-content: center;
+      border-radius: 8px;
+    }
+
+    main {
+      flex: 1;
+      max-width: 1100px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 24px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .guide-header {
+      text-align: center;
+    }
+
+    .guide-header h1 {
+      font-size: 28px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+      margin-bottom: 6px;
+    }
+
+    .guide-header p {
+      font-size: 14px;
+      color: var(--text-muted);
+    }
+
+    /* Framework Selector Tabs */
+    .fw-tabs-bar {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .fw-tab {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 700;
+      background: rgba(255, 255, 255, 0.04);
+      color: var(--text-muted);
+      border: 1px solid var(--card-border);
+      cursor: pointer;
+      transition: all 0.2s ease;
+      user-select: none;
+    }
+
+    body.light-theme .fw-tab {
+      background: #f1f5f9;
+    }
+
+    .fw-tab:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+    }
+
+    .fw-tab.active {
+      background: var(--primary-glow);
+      color: var(--primary);
+      border-color: var(--primary);
+      box-shadow: 0 0 16px var(--primary-glow);
+    }
+
+    /* Code Card */
+    .code-card {
+      background: #090d16;
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      overflow: hidden;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.4);
+    }
+
+    body.light-theme .code-card {
+      background: #ffffff;
+      border-color: #cbd5e1;
+    }
+
+    .code-card-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 14px 20px;
+      background: #111827;
+      border-bottom: 1px solid var(--card-border);
+    }
+
+    body.light-theme .code-card-header {
+      background: #f8fafc;
+      border-bottom-color: #e2e8f0;
+    }
+
+    .fw-title {
+      font-size: 15px;
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .copy-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: var(--text-muted);
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+
+    body.light-theme .copy-btn {
+      background: #e2e8f0;
+      border-color: #cbd5e1;
+      color: #334155;
+    }
+
+    .copy-btn:hover {
+      background: rgba(255, 255, 255, 0.18);
+      color: var(--text-main);
+    }
+
+    .code-area {
+      padding: 16px 20px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 13px;
+      line-height: 1.6;
+      color: #93c5fd;
+      max-height: 220px;
+      overflow-y: auto;
+      overflow-x: auto;
+      background: #07090e;
+      white-space: pre;
+    }
+
+    .code-area::-webkit-scrollbar {
+      width: 7px;
+      height: 7px;
+    }
+
+    .code-area::-webkit-scrollbar-track {
+      background: rgba(0, 0, 0, 0.2);
+    }
+
+    .code-area::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.2);
+      border-radius: 4px;
+    }
+
+    .code-area::-webkit-scrollbar-thumb:hover {
+      background: rgba(255, 255, 255, 0.35);
+    }
+
+    body.light-theme .code-area {
+      background: #f8fafc;
+      color: #0f172a;
+    }
+
+    body.light-theme .code-area::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+
+    body.light-theme .code-area::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+    }
+
+    /* 3 Step Workflow */
+    .steps-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 20px;
+    }
+
+    .step-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .step-number {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: var(--primary-glow);
+      color: var(--primary);
+      font-size: 13px;
+      font-weight: 800;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--primary);
+    }
+
+    .step-card h3 {
+      font-size: 15px;
+      color: var(--text-main);
+    }
+
+    .step-card p {
+      font-size: 13px;
+      color: var(--text-muted);
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body class="light-theme">
+
+  <header>
+    <a href="index.html" class="brand">
+      <div class="brand-icon">📄</div>
+      <div class="brand-name">DocView-All</div>
+    </a>
+    <div class="nav-links">
+      <a href="index.html" class="nav-btn nav-btn-primary">
+        ← Back to Live Viewer
+      </a>
+      <button class="nav-btn theme-toggle-btn" id="theme-btn" onclick="toggleGuideTheme()" title="Toggle Theme">
+        <svg id="theme-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+      </button>
+      <a href="https://github.com/VeereshMaps/docview-all" target="_blank" class="nav-btn">
+        GitHub
+      </a>
+    </div>
+  </header>
+
+  <main>
+    <div class="guide-header">
+      <h1>Integration & Code Guide</h1>
+      <p>Select your framework below and copy the snippet into your project.</p>
+    </div>
+
+    <!-- Framework Tabs with explicit inline onclicks -->
+    <div class="fw-tabs-bar" id="fw-tabs-container">
+      <button class="fw-tab active" id="tab-react" onclick="selectFw('react')">⚛️ React & Next.js</button>
+      <button class="fw-tab" id="tab-vue" onclick="selectFw('vue')">🟢 Vue 3 & Nuxt</button>
+      <button class="fw-tab" id="tab-angular" onclick="selectFw('angular')">🅰️ Angular</button>
+      <button class="fw-tab" id="tab-react-native" onclick="selectFw('react-native')">📱 React Native</button>
+      <button class="fw-tab" id="tab-svelte" onclick="selectFw('svelte')">🔥 Svelte</button>
+      <button class="fw-tab" id="tab-vanilla" onclick="selectFw('vanilla')">🌐 Vanilla JS / HTML</button>
+      <button class="fw-tab" id="tab-toastify" onclick="selectFw('toastify')">⚡ 1-Line API (Toastify Style)</button>
+    </div>
+
+    <!-- Code Display Card -->
+    <div class="code-card">
+      <div class="code-card-header">
+        <div class="fw-title" id="current-fw-title">⚛️ React & Next.js Integration</div>
+        <button class="copy-btn" id="copy-btn" onclick="copyCurrentCode()">
+          <svg width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"></rect><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"></path></svg>
+          <span id="copy-btn-text">Copy Code</span>
+        </button>
+      </div>
+      <pre class="code-area" id="code-content"></pre>
+    </div>
+
+    <!-- 3 Steps -->
+    <div class="steps-grid">
+      <div class="step-card">
+        <div class="step-number">1</div>
+        <h3>Install the Package</h3>
+        <p>Run <code>npm install docview-all</code> in your project terminal. Pure zero-dependency footprint (<15KB).</p>
+      </div>
+      <div class="step-card">
+        <div class="step-number">2</div>
+        <h3>Import Component & CSS</h3>
+        <p>Import <code>DocViewer</code> from your framework path and import <code>'docview-all/css'</code>.</p>
+      </div>
+      <div class="step-card">
+        <div class="step-number">3</div>
+        <h3>Pass File or Remote URL</h3>
+        <p>Pass any File object, local Blob, or remote URL (PDF, DOCX, XLSX, CSV, YAML, JSON, MP4, MP3, Code, etc.).</p>
+      </div>
+    </div>
+  </main>
+
+  <script src="./guide.js"></script>
+</body>
+</html>

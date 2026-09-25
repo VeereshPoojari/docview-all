@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.vscode/
+.idea/
+*.log
+.DS_Store
+Thumbs.db
+
+# Ignore Sample Documents & Test Files
+tests/samples/
+samples/

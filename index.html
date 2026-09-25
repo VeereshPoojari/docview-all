@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DocView-All 📄 | Universal Document & File Viewer</title>
+  <link rel="stylesheet" href="./src/styles/docview-all.css">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg-dark: #07090e;
+      --card-bg: rgba(13, 18, 30, 0.85);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --primary: #3b82f6;
+      --primary-glow: rgba(59, 130, 246, 0.35);
+      --accent: #10b981;
+      --text-main: #f3f4f6;
+      --text-muted: #94a3b8;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html, body {
+      width: 100%;
+      height: 100vh;
+      overflow: hidden;
+      background-color: var(--bg-dark);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.08) 0px, transparent 50%);
+      color: var(--text-main);
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Top Navigation Bar */
+    header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 24px;
+      height: 58px;
+      border-bottom: 1px solid var(--card-border);
+      backdrop-filter: blur(12px);
+      background: rgba(7, 9, 14, 0.9);
+      flex-shrink: 0;
+      z-index: 50;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+      color: #fff;
+    }
+
+    .brand-icon {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #3b82f6, #06b6d4);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 18px;
+      box-shadow: 0 0 16px var(--primary-glow);
+    }
+
+    .brand-name {
+      font-size: 18px;
+      font-weight: 800;
+      letter-spacing: -0.5px;
+    }
+
+    .brand-badge {
+      font-size: 10px;
+      font-weight: 700;
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+      padding: 2px 8px;
+      border-radius: 20px;
+      border: 1px solid rgba(59, 130, 246, 0.3);
+    }
+
+    .nav-links {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .nav-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s ease;
+      color: var(--text-muted);
+      border: 1px solid var(--card-border);
+      background: rgba(255, 255, 255, 0.03);
+      cursor: pointer;
+    }
+
+    .nav-btn:hover {
+      color: #fff;
+      border-color: rgba(255, 255, 255, 0.25);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .nav-btn-guide {
+      background: linear-gradient(135deg, #2563eb, #3b82f6);
+      color: #fff !important;
+      border: none;
+      box-shadow: 0 4px 12px var(--primary-glow);
+    }
+
+    .nav-btn-guide:hover {
+      background: linear-gradient(135deg, #1d4ed8, #2563eb);
+      transform: translateY(-1px);
+    }
+
+    .theme-toggle-btn {
+      width: 34px;
+      height: 34px;
+      padding: 0;
+      justify-content: center;
+      border-radius: 8px;
+    }
+
+    /* Full-Screen Workspace Layout */
+    .app-workspace {
+      flex: 1;
+      width: 100vw;
+      height: calc(100vh - 58px);
+      display: flex;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* Viewer Screen: True Full Width & Full Height */
+    .viewer-area {
+      flex: 1;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: #090d16;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Viewer Mount Container - True 100% Full Viewport */
+    #viewer-container {
+      flex: 1;
+      width: 100%;
+      height: 100%;
+      position: relative;
+      overflow: hidden;
+    }
+
+    /* Drag & Drop Overlay (Visible when dragging over anywhere on screen) */
+    .drag-overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(9, 13, 22, 0.92);
+      backdrop-filter: blur(8px);
+      display: none;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+      border: 3px dashed var(--primary);
+      gap: 14px;
+      pointer-events: none;
+    }
+
+    .drag-overlay.active {
+      display: flex;
+    }
+
+    .drag-overlay svg {
+      width: 56px;
+      height: 56px;
+      stroke: #60a5fa;
+      animation: bounce 1.5s infinite;
+    }
+
+    @keyframes bounce {
+      0%, 100% { transform: translateY(0); }
+      50% { transform: translateY(-10px); }
+    }
+
+    /* Light Theme Page Styles */
+    body.light-theme {
+      background-color: #f8fafc;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(59, 130, 246, 0.08) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(16, 185, 129, 0.05) 0px, transparent 50%);
+      color: #0f172a;
+    }
+
+    body.light-theme header {
+      background: rgba(255, 255, 255, 0.9);
+      border-bottom-color: #e2e8f0;
+    }
+
+    body.light-theme .brand {
+      color: #0f172a;
+    }
+
+    body.light-theme .nav-btn:not(.nav-btn-guide) {
+      color: #334155;
+      border-color: #cbd5e1;
+      background: rgba(0, 0, 0, 0.03);
+    }
+
+    body.light-theme .nav-btn:not(.nav-btn-guide):hover {
+      color: #0f172a;
+      border-color: #94a3b8;
+      background: rgba(0, 0, 0, 0.07);
+    }
+
+    body.light-theme .nav-btn-guide {
+      background: linear-gradient(135deg, #1d4ed8, #2563eb) !important;
+      color: #ffffff !important;
+      border: none !important;
+      box-shadow: 0 4px 14px rgba(37, 99, 235, 0.35) !important;
+      font-weight: 700;
+    }
+
+    body.light-theme .nav-btn-guide svg {
+      stroke: #ffffff !important;
+    }
+
+    body.light-theme .nav-btn-guide:hover {
+      background: linear-gradient(135deg, #1e40af, #1d4ed8) !important;
+      color: #ffffff !important;
+      transform: translateY(-1px);
+    }
+
+    body.light-theme .viewer-area {
+      background: #f1f5f9;
+    }
+  </style>
+</head>
+<body class="light-theme">
+
+  <!-- Top Header Navigation -->
+  <header>
+    <a href="index.html" class="brand">
+      <div class="brand-icon">📄</div>
+      <div class="brand-name">DocView-All</div>
+      <span class="brand-badge">Universal</span>
+    </a>
+
+    <div class="nav-links">
+      <a href="guide.html" class="nav-btn nav-btn-guide">
+        <svg width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="16 18 22 12 16 6"></polyline><polyline points="8 6 2 12 8 18"></polyline></svg>
+        Code & Framework Guide
+      </a>
+      <!-- Light / Dark Theme Button beside GitHub -->
+      <button class="nav-btn theme-toggle-btn" id="header-theme-btn" title="Toggle Theme">
+        <svg id="header-theme-icon" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path></svg>
+      </button>
+      <a href="https://github.com/VeereshMaps/docview-all" target="_blank" class="nav-btn">
+        <svg width="15" height="15" fill="currentColor" viewBox="0 0 24 24"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        GitHub
+      </a>
+      <a href="https://www.npmjs.com/package/docview-all" target="_blank" class="nav-btn">
+        npm v1.0.0
+      </a>
+    </div>
+  </header>
+
+  <!-- Full-Screen Workspace -->
+  <div class="app-workspace" id="app-workspace">
+    <div class="viewer-area">
+      
+      <!-- Main Viewer Target (Full-Height Canvas) -->
+      <div id="viewer-container"></div>
+
+      <!-- Drag & Drop Overlay -->
+      <div class="drag-overlay" id="drag-overlay">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="17 8 12 3 7 8"></polyline>
+          <line x1="12" y1="3" x2="12" y2="15"></line>
+        </svg>
+        <h2 style="color: #fff; font-size: 22px;">Drop any file to view instantly</h2>
+        <div class="dva-format-pill-cloud" style="margin-top: 10px; max-width: 700px;">
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">📄 PDF</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">📝 DOCX</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">📊 XLSX</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">📈 CSV</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">📽️ PPTX</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">📐 DRAW.IO</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">🏷️ XML</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">⚙️ YAML</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">📦 JSON</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">💻 CODE</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">🎵 AUDIO</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">🎬 VIDEO</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">🧱 3D</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">🖼️ IMAGES</span>
+          <span class="dva-format-pill" style="background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.2); color: #fff;">📜 TEXT</span>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <script type="module">
+    import { DocViewer } from './src/index.js';
+
+    // Initialize Viewer with DEFAULT EMPTY STATE (LIGHT THEME BY DEFAULT)
+    const viewer = new DocViewer('#viewer-container', {
+      file: null,
+      theme: 'light',
+      toolbar: {
+        presets: [
+          { label: '⚡ MPEG-DASH (.mpd)', url: 'https://dash.akamaized.net/envivio/EnvivioDash3/manifest.mpd' },
+          { label: '⚡ HLS (.m3u8)', url: 'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8' },
+          { label: '🎵 MP3 Audio', url: 'https://interactive-examples.mdn.mozilla.net/media/cc0-audio/t-rex-roar.mp3' },
+          { label: '📐 Diagram (.drawio)', url: './tests/samples/sample.drawio' },
+          { label: '⚙️ YAML (.yaml)', url: './tests/samples/sample.yaml' },
+          { label: '🏷️ XML (.xml)', url: './tests/samples/sample.xml' },
+          { label: '📽️ PPTX (.pptx)', url: './tests/samples/sample.pptx' }
+        ]
+      }
+    });
+
+    // Top Header Theme Toggle (light / dark)
+    const headerThemeBtn = document.getElementById('header-theme-btn');
+    const headerThemeIcon = document.getElementById('header-theme-icon');
+
+    headerThemeBtn.onclick = () => {
+      viewer.toggleTheme();
+      document.body.classList.toggle('light-theme', viewer.theme === 'light');
+      if (viewer.theme === 'dark') {
+        headerThemeIcon.innerHTML = '<circle cx="12" cy="12" r="5"></circle><line x1="12" y1="1" x2="12" y2="3"></line><line x1="12" y1="21" x2="12" y2="23"></line><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line><line x1="1" y1="12" x2="3" y2="12"></line><line x1="21" y1="12" x2="23" y2="12"></line><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>';
+      } else {
+        headerThemeIcon.innerHTML = '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>';
+      }
+    };
+
+    // Full-Screen Drag & Drop
+    const workspace = document.getElementById('app-workspace');
+    const dragOverlay = document.getElementById('drag-overlay');
+
+    window.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      dragOverlay.classList.add('active');
+    });
+
+    dragOverlay.addEventListener('dragleave', (e) => {
+      e.preventDefault();
+      dragOverlay.classList.remove('active');
+    });
+
+    window.addEventListener('drop', (e) => {
+      e.preventDefault();
+      dragOverlay.classList.remove('active');
+      if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0]) {
+        viewer.loadFile(e.dataTransfer.files[0]);
+      }
+    });
+  </script>
+</body>
+</html>
