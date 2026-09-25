@@ -98,15 +98,15 @@
     "zero-dependency",
     "cross-platform"
   ],
-  "author": "Veeresh Poojari <veeresh.maps@gmail.com> (https://github.com/VeereshMaps)",
+  "author": "Veeresh Poojari <veeresh.maps@gmail.com> (https://github.com/VeereshPoojari)",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/VeereshMaps/docview-all.git"
+    "url": "git+https://github.com/VeereshPoojari/docview-all.git"
   },
   "bugs": {
-    "url": "https://github.com/VeereshMaps/docview-all/issues"
+    "url": "https://github.com/VeereshPoojari/docview-all/issues"
   },
-  "homepage": "https://veereshmaps.github.io/docview-all/",
+  "homepage": "https://veereshpoojari.github.io/docview-all/",
   "license": "UNLICENSED",
   "devDependencies": {
     "@rollup/plugin-commonjs": "^25.0.7",

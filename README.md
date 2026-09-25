@@ -8,17 +8,17 @@
 [![Zero Dependencies](https://img.shields.io/badge/dependencies-0%20runtime-brightgreen.svg)](#)
 [![Multi-Platform](https://img.shields.io/badge/platforms-React%20%7C%20Vue%20%7C%20Angular%20%7C%20Svelte%20%7C%20RN%20%7C%20HTML5-purple.svg)](#)
 [![License](https://img.shields.io/badge/license-UNLICENSED-red.svg)](#)
-[![Live Demo](https://img.shields.io/badge/demo-interactive%20playground-gradient.svg)](https://veereshmaps.github.io/docview-all/)
+[![Live Demo](https://img.shields.io/badge/demo-interactive%20playground-gradient.svg)](https://veereshpoojari.github.io/docview-all/)
 
 ---
 
 ## 🌐 Live Interactive Demo
 
 Try **DocView-All** directly in your browser with zero installation (drag & drop, cloud URLs, and 67+ formats):  
-👉 **[Open Live Demo Playground](https://veereshmaps.github.io/docview-all/)** (`https://veereshmaps.github.io/docview-all/`)
+👉 **[Open Live Demo Playground](https://veereshpoojari.github.io/docview-all/)** (`https://veereshpoojari.github.io/docview-all/`)
 
 Explore the interactive multi-framework integration guide & code generator:  
-👉 **[Open Code & Framework Guide](https://veereshmaps.github.io/docview-all/guide.html)** (`https://veereshmaps.github.io/docview-all/guide.html`)
+👉 **[Open Code & Framework Guide](https://veereshpoojari.github.io/docview-all/guide.html)** (`https://veereshpoojari.github.io/docview-all/guide.html`)
 
 ---
 
@@ -310,10 +310,10 @@ node tests/engines.test.js
 ## 🤝 Contributing
 
 Contributions, feature requests, and bug reports are welcome!  
-Feel free to open an issue or submit a pull request on the [GitHub Repository](https://github.com/VeereshMaps/docview-all).
+Feel free to open an issue or submit a pull request on the [GitHub Repository](https://github.com/VeereshPoojari/docview-all).
 
 ---
 
 ## 📄 License
 
-UNLICENSED © [Veeresh Poojari](https://github.com/VeereshMaps). All rights reserved.
+UNLICENSED © [Veeresh Poojari](https://github.com/VeereshPoojari). All rights reserved.
