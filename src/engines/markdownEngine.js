@@ -11,15 +11,7 @@
  * - Fast text statistics (word count, line count)
  */
 
-function escapeHtml(str) {
-  if (!str) return '';
-  return str
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
+import { sanitizeUrl, escapeHtml } from '../utils/security.js';
 
 export class MarkdownEngine {
   constructor(viewer) {
@@ -225,7 +217,10 @@ export class MarkdownEngine {
     });
 
     // 13. Inline links: [text](url)
-    src = src.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener" class="dva-md-link">$1</a>');
+    src = src.replace(/\[([^\]]+)\]\(([^)]+)\)/g, (match, text, url) => {
+      const safeUrl = sanitizeUrl(url);
+      return `<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="dva-md-link">${text}</a>`;
+    });
 
     // 14. Typography (Bold, Italic, Strikethrough)
     src = src.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');

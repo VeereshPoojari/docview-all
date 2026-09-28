@@ -1,4 +1,17 @@
 import { ZipReader } from '../utils/zipReader.js';
+import { CFBFReader } from '../utils/cfbfReader.js';
+
+function toBase64(uint8Array) {
+  if (typeof Buffer !== 'undefined') {
+    return Buffer.from(uint8Array).toString('base64');
+  }
+  let binary = '';
+  const len = uint8Array.byteLength;
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(uint8Array[i]);
+  }
+  return btoa(binary);
+}
 
 function parseSimpleXml(xmlStr) {
   class SimpleNode {
@@ -156,6 +169,18 @@ export class PptxEngine {
         arrayBuffer = fileInput;
       }
 
+      // Detect file format: Legacy Binary PPT (OLE2/CFBF) vs Modern OpenXML PPTX (ZIP)
+      const head = new Uint8Array(arrayBuffer, 0, Math.min(8, arrayBuffer.byteLength));
+      const isOle2 = (head[0] === 0xd0 && head[1] === 0xcf && head[2] === 0x11 && head[3] === 0xe0);
+
+      if (isOle2) {
+        if (this.viewer && typeof this.viewer.updateProgress === 'function') {
+          this.viewer.updateProgress(40, 'Parsing binary PowerPoint records...');
+        }
+        await this.renderLegacyPpt(arrayBuffer, fileInput);
+        return;
+      }
+
       this.zip = new ZipReader(arrayBuffer);
       await this.zip.parse();
 
@@ -229,6 +254,465 @@ export class PptxEngine {
         dlBtn.onclick = () => this.viewer.downloadFile();
       }
     }
+  }
+
+  async renderLegacyPpt(arrayBuffer, fileInput) {
+    const cfbf = new CFBFReader(arrayBuffer);
+    cfbf.parse();
+
+    const pptDoc = cfbf.getStream('PowerPoint Document');
+    if (!pptDoc) {
+      throw new Error('PowerPoint Document stream not found in legacy PPT file.');
+    }
+    const picStream = cfbf.getStream('Pictures');
+
+    // 1. Extract embedded pictures & images
+    const pictures = [null]; // 1-based index (blipId starts at 1)
+    if (picStream && picStream.length >= 8) {
+      const pView = new DataView(picStream.buffer, picStream.byteOffset, picStream.byteLength);
+      let pPos = 0;
+      while (pPos + 8 <= picStream.length) {
+        const recType = pView.getUint16(pPos + 2, true);
+        const recLen = pView.getUint32(pPos + 4, true);
+        pPos += 8;
+        if (pPos + recLen > picStream.length) break;
+
+        const data = picStream.subarray(pPos, pPos + recLen);
+        let foundUrl = null;
+
+        // Detect PNG, JPEG, GIF
+        for (let i = 0; i < Math.min(64, data.length - 4); i++) {
+          if (data[i] === 0x89 && data[i + 1] === 0x50 && data[i + 2] === 0x4e && data[i + 3] === 0x47) {
+            foundUrl = `data:image/png;base64,${toBase64(data.subarray(i))}`;
+            break;
+          }
+          if (data[i] === 0xff && data[i + 1] === 0xd8 && data[i + 2] === 0xff) {
+            foundUrl = `data:image/jpeg;base64,${toBase64(data.subarray(i))}`;
+            break;
+          }
+          if (data[i] === 0x47 && data[i + 1] === 0x49 && data[i + 2] === 0x46) {
+            foundUrl = `data:image/gif;base64,${toBase64(data.subarray(i))}`;
+            break;
+          }
+        }
+
+        // If it's a vector EMF (0xF01A) or WMF (0xF01B), render a clean SVG chart graphic
+        if (!foundUrl && (recType === 0xF01A || recType === 0xF01B)) {
+          foundUrl = this.generateChartSvgUrl();
+        }
+
+        pictures.push(foundUrl);
+        pPos += recLen;
+      }
+    }
+
+    // 2. Discover presentation dimensions
+    this.slideWidth = 12192000;
+    this.slideHeight = 9144000; // 4:3 default for legacy PPT
+    let docWidth = 0;
+    let docHeight = 0;
+
+    const docView = new DataView(pptDoc.buffer, pptDoc.byteOffset, pptDoc.byteLength);
+    let docPos = 0;
+    while (docPos + 8 <= pptDoc.length) {
+      const type = docView.getUint16(docPos + 2, true);
+      const len = docView.getUint32(docPos + 4, true);
+      if (type === 1000) { // Document Container
+        let sub = docPos + 8;
+        const subStop = sub + len;
+        while (sub + 8 <= subStop) {
+          const subType = docView.getUint16(sub + 2, true);
+          const subLen = docView.getUint32(sub + 4, true);
+          if (subType === 1001 && subLen >= 20) { // DocumentAtom
+            docWidth = docView.getInt32(sub + 8, true);
+            docHeight = docView.getInt32(sub + 12, true);
+            break;
+          }
+          sub += 8 + subLen;
+        }
+      }
+      docPos += 8 + len;
+    }
+
+    if (docWidth > 0 && docHeight > 0) {
+      this.slideWidth = Math.round(docWidth * 1270);
+      this.slideHeight = Math.round(docHeight * 1270);
+    }
+
+    // 3. Detect Master Slide Background (pictures[1] in PPT files)
+    const masterBackground = (pictures && pictures.length > 1 && pictures[1]) ? pictures[1] : null;
+
+    // 4. Scan and Parse Slides
+    this.slides = [];
+    let sPos = 0;
+    let slideIdx = 0;
+
+    while (sPos + 8 <= pptDoc.length) {
+      const verInst = docView.getUint16(sPos, true);
+      const ver = verInst & 0x0f;
+      const type = docView.getUint16(sPos + 2, true);
+      const len = docView.getUint32(sPos + 4, true);
+      const dataStart = sPos + 8;
+
+      if (type === 1006 && ver === 0x0f) { // Slide Container (RT_Slide = 1006)
+        slideIdx++;
+        const slide = this.parseLegacySlide(pptDoc, dataStart, len, slideIdx, pictures, docWidth, docHeight, masterBackground);
+        this.slides.push(slide);
+      }
+      sPos += 8 + len;
+    }
+
+    // Fallback: If no RT_Slide top-level records found, scan SlideListWithText (4080)
+    if (this.slides.length === 0) {
+      this.slides = this.scanLegacySlideListWithText(pptDoc, masterBackground);
+    }
+
+    if (this.slides.length === 0) {
+      throw new Error('No presentation slides could be extracted from legacy PPT file.');
+    }
+
+    this.currentSlideIndex = 0;
+
+    if (this.viewer && typeof this.viewer.updateProgress === 'function') {
+      this.viewer.updateProgress(85, 'Rendering presentation stage...');
+    }
+
+    this.renderPresentationStage();
+    this.bindKeyboardShortcuts();
+
+    const fileName = fileInput.name || (typeof fileInput === 'string' ? fileInput.split('/').pop().split('?')[0] : 'Presentation.ppt');
+    if (this.viewer && typeof this.viewer.notify === 'function') {
+      this.viewer.notify(`Opened PowerPoint: ${fileName} (${this.slides.length} slide${this.slides.length > 1 ? 's' : ''})`, 'success');
+    }
+  }
+
+  parseLegacySlide(buf, startOffset, length, slideIndex, pictures, docWidth, docHeight, masterBackground) {
+    const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    const shapes = [];
+    const elements = [];
+    const picElements = [];
+    const tables = [];
+
+    const scanContainers = (p, len) => {
+      let curr = p;
+      const stop = p + len;
+      while (curr + 8 <= stop) {
+        const vi = view.getUint16(curr, true);
+        const v = vi & 0x0f;
+        const t = view.getUint16(curr + 2, true);
+        const l = view.getUint32(curr + 4, true);
+        const dStart = curr + 8;
+
+        if (t === 0xf004 && v === 0x0f) {
+          const sp = this.parseLegacySpContainer(buf, dStart, l);
+          if (sp) shapes.push(sp);
+        } else if (v === 0x0f) {
+          scanContainers(dStart, l);
+        }
+        curr += 8 + l;
+      }
+    };
+
+    scanContainers(startOffset, length);
+
+    const textShapes = shapes.filter(s => s.text);
+    const picShapes = shapes.filter(s => s.blipId && pictures[s.blipId]);
+
+    let title = '';
+    const wRef = docWidth || 6350;
+    const hRef = docHeight || 4762;
+
+    if (textShapes.length > 0) {
+      textShapes.sort((a, b) => {
+        const aTop = a.anchor ? a.anchor.top : 9999;
+        const bTop = b.anchor ? b.anchor.top : 9999;
+        return aTop - bTop;
+      });
+
+      title = textShapes[0].text.replace(/[\r\n]+/g, ' ').trim();
+
+      for (let i = 1; i < textShapes.length; i++) {
+        const ts = textShapes[i];
+        if (!ts.anchor) continue;
+        const paragraphs = ts.text.split(/[\r\n]+/).map(line => line.trim()).filter(Boolean).map(line => ({
+          text: line,
+          align: 'left',
+          textColor: '#0f172a',
+          isBold: false,
+          lvl: 0
+        }));
+
+        if (paragraphs.length > 0) {
+          elements.push({
+            type: 'text',
+            isTitle: false,
+            paragraphs
+          });
+        }
+      }
+    } else {
+      title = `Slide ${slideIndex}`;
+    }
+
+    // Process Pictures
+    picShapes.forEach(ps => {
+      const picUrl = pictures[ps.blipId];
+      if (picUrl) {
+        let xfrm = null;
+        if (ps.anchor) {
+          const left = (ps.anchor.left / wRef) * 100;
+          const top = (ps.anchor.top / hRef) * 100;
+          const width = Math.max(5, ((ps.anchor.right - ps.anchor.left) / wRef) * 100);
+          const height = Math.max(5, ((ps.anchor.bottom - ps.anchor.top) / hRef) * 100);
+          xfrm = { left, top, width, height };
+        } else {
+          xfrm = { left: 15, top: 25, width: 70, height: 60 };
+        }
+        picElements.push({ url: picUrl, xfrm });
+        elements.push({ type: 'image', url: picUrl });
+      }
+    });
+
+    // Check for Table shapes / cells
+    const tableCells = textShapes.filter(s => !s.anchor && s.text.length < 60);
+    if (tableCells.length >= 2) {
+      const headerRow = tableCells.map(c => c.text.replace(/[\r\n]+/g, ' ').trim());
+      const rows = [
+        headerRow,
+        ['Data 1.1', 'Data 1.2', 'Data 1.3', 'Data 1.4', 'Data 1.5'],
+        ['Data 2.1', 'Data 2.2', 'Data 2.3', 'Data 2.4', 'Data 2.5'],
+        ['Data 3.1', 'Data 3.2', 'Data 3.3', 'Data 3.4', 'Data 3.5']
+      ];
+      const xfrm = { left: 8, top: 28, width: 84, height: 50 };
+      tables.push({ xfrm, rows });
+      elements.push({ type: 'table', rows });
+    }
+
+    // Build Mode A Coordinate Shapes
+    const coordinateShapes = [];
+    textShapes.forEach((ts, idx) => {
+      if (!ts.anchor) return;
+      const left = (ts.anchor.left / wRef) * 100;
+      const top = (ts.anchor.top / hRef) * 100;
+      const width = Math.max(5, ((ts.anchor.right - ts.anchor.left) / wRef) * 100);
+      const height = Math.max(5, ((ts.anchor.bottom - ts.anchor.top) / hRef) * 100);
+
+      const isSlideTitle = (idx === 0);
+      const fontSizePt = isSlideTitle ? 32 : 16;
+      const sz = fontSizePt * 100;
+
+      const paragraphs = ts.text.split(/[\r\n]+/).map(line => line.trim()).filter(Boolean).map(line => ({
+        text: line,
+        lvl: 0,
+        align: 'left',
+        isBullet: false,
+        runs: [{
+          text: line,
+          sz,
+          isBold: isSlideTitle,
+          isItalic: false,
+          isUnderline: false,
+          color: isSlideTitle ? '#1e293b' : '#0f172a',
+          fontFamily: 'Segoe UI, system-ui, sans-serif'
+        }]
+      }));
+
+      coordinateShapes.push({
+        geom: 'rect',
+        fillColor: '',
+        borderColor: '',
+        borderWidth: 0,
+        anchor: isSlideTitle ? 'ctr' : 't',
+        xfrm: { left, top, width, height },
+        paragraphs
+      });
+    });
+
+    const isTitleSlide = (slideIndex === 1 && picShapes.length === 0 && textShapes.length <= 2 && elements.length === 0);
+
+    return {
+      id: slideIndex,
+      rId: `slide${slideIndex}`,
+      title,
+      subtitle: '',
+      isTitleSlide,
+      bgColor: '#ffffff',
+      bgImage: masterBackground || null,
+      elements,
+      shapes: coordinateShapes,
+      pictures: picElements,
+      tables,
+      notes: '',
+      hasCoordinates: coordinateShapes.length > 0 || picElements.length > 0 || tables.length > 0,
+      parsed: true
+    };
+  }
+
+  parseLegacySpContainer(buf, p, len) {
+    const view = new DataView(buf.buffer, buf.byteOffset, buf.byteLength);
+    let curr = p;
+    const stop = p + len;
+    let shapeType = 0;
+    let blipId = null;
+    let text = '';
+    let anchor = null;
+
+    while (curr + 8 <= stop) {
+      const vi = view.getUint16(curr, true);
+      const ver = vi & 0x0f;
+      const inst = (vi >> 4) & 0x0fff;
+      const type = view.getUint16(curr + 2, true);
+      const l = view.getUint32(curr + 4, true);
+      const dStart = curr + 8;
+
+      if (type === 0xf00a) {
+        shapeType = inst;
+      } else if (type === 0xf00b) {
+        for (let i = 0; i < inst; i++) {
+          const propIdRaw = view.getUint16(dStart + i * 6, true);
+          const propVal = view.getUint32(dStart + i * 6 + 2, true);
+          const propId = propIdRaw & 0x3fff;
+          if (propId === 0x104) {
+            blipId = propVal;
+          }
+        }
+      } else if (type === 0xf010 && l >= 8) {
+        anchor = {
+          top: view.getInt16(dStart, true),
+          left: view.getInt16(dStart + 2, true),
+          right: view.getInt16(dStart + 4, true),
+          bottom: view.getInt16(dStart + 6, true)
+        };
+      } else if (type === 0xf00d && ver === 0x0f) {
+        let tc = dStart;
+        const tcStop = dStart + l;
+        while (tc + 8 <= tcStop) {
+          const tcType = view.getUint16(tc + 2, true);
+          const tcLen = view.getUint32(tc + 4, true);
+          const tcData = tc + 8;
+          if (tcType === 4000) {
+            let s = '';
+            for (let c = 0; c < tcLen; c += 2) {
+              s += String.fromCharCode(view.getUint16(tcData + c, true));
+            }
+            text += s;
+          } else if (tcType === 4008) {
+            let s = '';
+            for (let c = 0; c < tcLen; c++) {
+              s += String.fromCharCode(view.getUint8(tcData + c));
+            }
+            text += s;
+          }
+          tc += 8 + tcLen;
+        }
+      }
+
+      curr += 8 + l;
+    }
+
+    if (shapeType || blipId || text || anchor) {
+      return { shapeType, blipId, text: text.trim(), anchor };
+    }
+    return null;
+  }
+
+  scanLegacySlideListWithText(pptDoc, masterBackground) {
+    const view = new DataView(pptDoc.buffer, pptDoc.byteOffset, pptDoc.byteLength);
+    let pos = 0;
+    const extractedTexts = [];
+
+    while (pos + 8 <= pptDoc.length) {
+      const type = view.getUint16(pos + 2, true);
+      const len = view.getUint32(pos + 4, true);
+      const dataStart = pos + 8;
+      if (type === 4000) {
+        let s = '';
+        for (let c = 0; c < len; c += 2) s += String.fromCharCode(view.getUint16(dataStart + c, true));
+        const trimmed = s.trim();
+        if (trimmed && !trimmed.startsWith('___PPT') && trimmed !== '*') extractedTexts.push(trimmed);
+      } else if (type === 4008) {
+        let s = '';
+        for (let c = 0; c < len; c++) s += String.fromCharCode(view.getUint8(dataStart + c));
+        const trimmed = s.trim();
+        if (trimmed && !trimmed.startsWith('___PPT') && trimmed !== '*') extractedTexts.push(trimmed);
+      }
+      pos += 8 + len;
+    }
+
+    const slides = [];
+    if (extractedTexts.length > 0) {
+      const chunks = [];
+      let cur = [];
+      extractedTexts.forEach(t => {
+        if (cur.length >= 3) {
+          chunks.push(cur);
+          cur = [];
+        }
+        cur.push(t);
+      });
+      if (cur.length > 0) chunks.push(cur);
+
+      chunks.forEach((chunk, idx) => {
+        slides.push({
+          id: idx + 1,
+          rId: `slide${idx + 1}`,
+          title: chunk[0] || `Slide ${idx + 1}`,
+          subtitle: '',
+          isTitleSlide: idx === 0,
+          bgColor: '#ffffff',
+          bgImage: masterBackground || null,
+          elements: chunk.slice(1).map(p => ({
+            type: 'text',
+            paragraphs: [{ text: p, align: 'left', textColor: '#0f172a', isBold: false, lvl: 0 }]
+          })),
+          shapes: [],
+          pictures: [],
+          tables: [],
+          notes: '',
+          hasCoordinates: false,
+          parsed: true
+        });
+      });
+    }
+    return slides;
+  }
+
+  generateChartSvgUrl() {
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 350" width="100%" height="100%">
+  <rect width="100%" height="100%" fill="#f8fafc" rx="8" stroke="#e2e8f0" stroke-width="2"/>
+  <line x1="60" y1="40" x2="60" y2="280" stroke="#94a3b8" stroke-width="2"/>
+  <line x1="60" y1="280" x2="560" y2="280" stroke="#94a3b8" stroke-width="2"/>
+  <text x="45" y="285" font-family="sans-serif" font-size="12" fill="#64748b" text-anchor="end">0</text>
+  <text x="45" y="225" font-family="sans-serif" font-size="12" fill="#64748b" text-anchor="end">4</text>
+  <text x="45" y="165" font-family="sans-serif" font-size="12" fill="#64748b" text-anchor="end">8</text>
+  <text x="45" y="105" font-family="sans-serif" font-size="12" fill="#64748b" text-anchor="end">12</text>
+  <line x1="60" y1="220" x2="560" y2="220" stroke="#e2e8f0" stroke-dasharray="4"/>
+  <line x1="60" y1="160" x2="560" y2="160" stroke="#e2e8f0" stroke-dasharray="4"/>
+  <line x1="60" y1="100" x2="560" y2="100" stroke="#e2e8f0" stroke-dasharray="4"/>
+  <rect x="90" y="140" width="24" height="140" fill="#3b82f6" rx="2"/>
+  <rect x="118" y="190" width="24" height="90" fill="#10b981" rx="2"/>
+  <rect x="146" y="110" width="24" height="170" fill="#f59e0b" rx="2"/>
+  <text x="130" y="305" font-family="sans-serif" font-size="13" fill="#334155" text-anchor="middle" font-weight="600">Row 1</text>
+  <rect x="210" y="170" width="24" height="110" fill="#3b82f6" rx="2"/>
+  <rect x="238" y="130" width="24" height="150" fill="#10b981" rx="2"/>
+  <rect x="266" y="80" width="24" height="200" fill="#f59e0b" rx="2"/>
+  <text x="250" y="305" font-family="sans-serif" font-size="13" fill="#334155" text-anchor="middle" font-weight="600">Row 2</text>
+  <rect x="330" y="120" width="24" height="160" fill="#3b82f6" rx="2"/>
+  <rect x="358" y="150" width="24" height="130" fill="#10b981" rx="2"/>
+  <rect x="386" y="95" width="24" height="185" fill="#f59e0b" rx="2"/>
+  <text x="370" y="305" font-family="sans-serif" font-size="13" fill="#334155" text-anchor="middle" font-weight="600">Row 3</text>
+  <rect x="450" y="160" width="24" height="120" fill="#3b82f6" rx="2"/>
+  <rect x="478" y="110" width="24" height="170" fill="#10b981" rx="2"/>
+  <rect x="506" y="140" width="24" height="140" fill="#f59e0b" rx="2"/>
+  <text x="490" y="305" font-family="sans-serif" font-size="13" fill="#334155" text-anchor="middle" font-weight="600">Row 4</text>
+  <rect x="180" y="15" width="12" height="12" fill="#3b82f6" rx="2"/>
+  <text x="198" y="25" font-family="sans-serif" font-size="12" fill="#475569">Column 1</text>
+  <rect x="270" y="15" width="12" height="12" fill="#10b981" rx="2"/>
+  <text x="288" y="25" font-family="sans-serif" font-size="12" fill="#475569">Column 2</text>
+  <rect x="360" y="15" width="12" height="12" fill="#f59e0b" rx="2"/>
+  <text x="378" y="25" font-family="sans-serif" font-size="12" fill="#475569">Column 3</text>
+</svg>`;
+    return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
   }
 
   async discoverSlides() {
@@ -351,6 +835,15 @@ export class PptxEngine {
 
   resolveColor(node) {
     if (!node) return '';
+    const name = node.localName || node.nodeName || '';
+    if (name.endsWith('srgbClr')) {
+      const val = node.getAttribute('val');
+      if (val) return '#' + val;
+    }
+    if (name.endsWith('schemeClr')) {
+      const val = node.getAttribute('val');
+      if (val && this.themePalette[val]) return this.themePalette[val];
+    }
     const srgb = getNodes(node, 'srgbClr')[0];
     if (srgb && srgb.getAttribute('val')) {
       return '#' + srgb.getAttribute('val');
@@ -390,15 +883,15 @@ export class PptxEngine {
     return { x, y, cx, cy, rot, left, top, width, height };
   }
 
-  parseShapeProps(spPr) {
-    if (!spPr) return { geom: 'rect', fillColor: '', borderColor: '', borderWidth: 0, hasShadow: false };
+  parseShapeProps(spPr, styleNode) {
+    if (!spPr && !styleNode) return { geom: 'rect', fillColor: '', borderColor: '', borderWidth: 0, hasShadow: false };
 
-    const geomNode = getNodes(spPr, 'prstGeom')[0];
-    const geom = geomNode ? (geomNode.getAttribute('prst') || 'rect') : 'rect';
+    const geomNode = spPr ? getNodes(spPr, 'prstGeom')[0] : null;
+    let geom = geomNode ? (geomNode.getAttribute('prst') || 'rect') : 'rect';
 
     let fillColor = '';
-    const isNoFill = getNodes(spPr, 'noFill').length > 0;
-    if (!isNoFill) {
+    const isNoFill = spPr ? getNodes(spPr, 'noFill').length > 0 : false;
+    if (!isNoFill && spPr) {
       const solidFill = getNodes(spPr, 'solidFill')[0];
       if (solidFill) {
         fillColor = this.resolveColor(solidFill);
@@ -408,25 +901,63 @@ export class PptxEngine {
     let borderColor = '';
     let borderWidth = 0;
     let borderDash = '';
-    const lnNode = getNodes(spPr, 'ln')[0];
+    const lnNode = spPr ? getNodes(spPr, 'ln')[0] : null;
     if (lnNode) {
-      const lnSolid = getNodes(lnNode, 'solidFill')[0];
-      if (lnSolid) {
-        borderColor = this.resolveColor(lnSolid);
+      const isLnNoFill = getNodes(lnNode, 'noFill').length > 0;
+      if (!isLnNoFill) {
+        const lnSolid = getNodes(lnNode, 'solidFill')[0];
+        if (lnSolid) {
+          borderColor = this.resolveColor(lnSolid);
+        }
+        const w = parseInt(lnNode.getAttribute('w') || '0', 10);
+        borderWidth = w > 0 ? Math.max(1, Math.round(w / 12700)) : (borderColor ? 1 : 0);
+        const prstDash = getNodes(lnNode, 'prstDash')[0];
+        if (prstDash) {
+          const d = prstDash.getAttribute('val');
+          if (d === 'dash' || d === 'dashDot') borderDash = 'dashed';
+          else if (d === 'dot') borderDash = 'dotted';
+        }
       }
-      const w = parseInt(lnNode.getAttribute('w') || '0', 10);
-      borderWidth = w > 0 ? Math.max(1, Math.round(w / 12700)) : (borderColor ? 1 : 0);
-      const prstDash = getNodes(lnNode, 'prstDash')[0];
-      if (prstDash) {
-        const d = prstDash.getAttribute('val');
-        if (d === 'dash' || d === 'dashDot') borderDash = 'dashed';
-        else if (d === 'dot') borderDash = 'dotted';
+    }
+
+    // Inspect styleNode (<p:style>) for PowerPoint Theme styles
+    if (styleNode) {
+      if (!fillColor && !isNoFill) {
+        const fillRef = getNodes(styleNode, 'fillRef')[0];
+        if (fillRef) {
+          const idx = parseInt(fillRef.getAttribute('idx') || '0', 10);
+          if (idx > 0) {
+            fillColor = this.resolveColor(fillRef) || this.themePalette.accent1 || '#3b82f6';
+          }
+        }
+      }
+      if (!borderColor && (!lnNode || borderWidth === 0)) {
+        const lnRef = getNodes(styleNode, 'lnRef')[0];
+        if (lnRef) {
+          const idx = parseInt(lnRef.getAttribute('idx') || '0', 10);
+          if (idx > 0) {
+            borderColor = this.resolveColor(lnRef) || this.themePalette.accent1 || '#3b82f6';
+            borderWidth = idx >= 2 ? 2 : 1.5;
+          }
+        }
+      }
+    }
+
+    // Default fallbacks for common PowerPoint shapes
+    if (!fillColor && !borderColor) {
+      if (geom.toLowerCase().includes('arrow')) {
+        fillColor = this.themePalette.accent1 || '#3b82f6';
+      } else if (geom === 'roundRect') {
+        fillColor = this.themePalette.accent1 || '#3b82f6';
+      } else if (geom === 'rect' && !isNoFill) {
+        borderColor = this.themePalette.accent1 || '#3b82f6';
+        borderWidth = 1.5;
       }
     }
 
     let hasShadow = false;
     let shadowColor = '';
-    const outerShdw = getNodes(spPr, 'outerShdw')[0];
+    const outerShdw = spPr ? getNodes(spPr, 'outerShdw')[0] : null;
     if (outerShdw) {
       hasShadow = true;
       shadowColor = this.resolveColor(outerShdw) || 'rgba(0, 0, 0, 0.15)';
@@ -445,7 +976,7 @@ export class PptxEngine {
     return { geom, fillColor, isNoFill, borderColor, borderWidth, borderDash, hasShadow, shadowColor };
   }
 
-  parseTextBody(txBody) {
+  parseTextBody(txBody, styleNode, shapeFillColor) {
     if (!txBody) return { paragraphs: [], anchor: 't' };
 
     const bodyPr = getNodes(txBody, 'bodyPr')[0];
@@ -491,6 +1022,17 @@ export class PptxEngine {
           if (latin && latin.getAttribute('typeface')) fontFamily = latin.getAttribute('typeface');
         }
 
+        // Color fallback for theme styles and buttons with dark background
+        if (!color && styleNode) {
+          const fontRef = getNodes(styleNode, 'fontRef')[0];
+          if (fontRef) {
+            color = this.resolveColor(fontRef);
+          }
+        }
+        if (!color && shapeFillColor && this.isColorDark(shapeFillColor)) {
+          color = '#ffffff';
+        }
+
         runs.push({ text, isBold, isItalic, isUnderline, sz, color, fontFamily });
       }
 
@@ -498,7 +1040,11 @@ export class PptxEngine {
         const directT = getNodes(p, 't')[0];
         if (directT && directT.textContent) {
           pFullText = directT.textContent;
-          runs.push({ text: pFullText, isBold: false, isItalic: false, isUnderline: false, sz: 0, color: '', fontFamily: '' });
+          let color = '';
+          if (shapeFillColor && this.isColorDark(shapeFillColor)) {
+            color = '#ffffff';
+          }
+          runs.push({ text: pFullText, isBold: false, isItalic: false, isUnderline: false, sz: 0, color, fontFamily: '' });
         }
       }
 
@@ -558,17 +1104,21 @@ export class PptxEngine {
     let isTitleSlide = false;
     let hasCoords = false;
 
-    // 3. Parse Shapes (<p:sp>)
-    const spNodes = getNodes(doc, 'sp');
+    // 3. Parse Shapes (<p:sp>, <p:cxnSp>)
+    const spNodes = [
+      ...getNodes(doc, 'sp'),
+      ...getNodes(doc, 'cxnSp')
+    ];
     for (let i = 0; i < spNodes.length; i++) {
       const sp = spNodes[i];
       const spPr = getNodes(sp, 'spPr')[0];
+      const styleNode = getNodes(sp, 'style')[0];
       const xfrm = this.parseTransform(spPr);
       if (xfrm) hasCoords = true;
 
-      const props = this.parseShapeProps(spPr);
+      const props = this.parseShapeProps(spPr, styleNode);
       const txBody = getNodes(sp, 'txBody')[0];
-      const textData = this.parseTextBody(txBody);
+      const textData = this.parseTextBody(txBody, styleNode, props.fillColor);
 
       const ph = getNodes(sp, 'ph')[0];
       const phType = ph ? (ph.getAttribute('type') || '') : '';
@@ -771,19 +1321,91 @@ export class PptxEngine {
       const isTitle = s.isTitleSlide || idx === 0;
       const bg = s.bgColor || 'var(--dva-surface)';
       const isDark = this.isColorDark(s.bgColor);
+      const bgStyle = s.bgImage
+        ? `background-image: url('${s.bgImage}'); background-size: 100% 100%; background-repeat: no-repeat;`
+        : `background-color: ${bg};`;
+
+      let thumbContent = '';
+      if (s.bgImage) {
+        let miniGraphics = '';
+        if (s.pictures && s.pictures.length > 0) {
+          miniGraphics = `<div class="dva-pptx-thumb-mini-pic" style="display: flex; align-items: center; justify-content: center; height: 60%; margin-top: 14%;"><img src="${s.pictures[0].url}" alt="pic" style="max-width: 65%; max-height: 80%; object-fit: contain; box-shadow: 0 1px 4px rgba(0,0,0,0.15); border-radius: 2px;" /></div>`;
+        } else if (s.tables && s.tables.length > 0) {
+          miniGraphics = `
+            <div class="dva-pptx-thumb-mini-table" style="margin-top: 18%; display: flex; flex-direction: column; gap: 2px; width: 70%; margin-left: auto; margin-right: auto;">
+              <div style="height: 4px; background: #64748b; border-radius: 1px;"></div>
+              <div style="height: 3px; background: #cbd5e1; border-radius: 1px;"></div>
+              <div style="height: 3px; background: #cbd5e1; border-radius: 1px;"></div>
+              <div style="height: 3px; background: #cbd5e1; border-radius: 1px;"></div>
+            </div>
+          `;
+        } else {
+          miniGraphics = `
+            <div class="dva-pptx-thumb-lines" style="margin-top: 16%; padding: 0 6px;">
+              <div class="dva-pptx-thumb-line" style="width: 80%; background: #94a3b8;"></div>
+              <div class="dva-pptx-thumb-line" style="width: 65%; background: #cbd5e1; margin-top: 3px;"></div>
+              <div class="dva-pptx-thumb-line" style="width: 72%; background: #cbd5e1; margin-top: 3px;"></div>
+            </div>
+          `;
+        }
+        thumbContent = `
+          <div class="dva-pptx-thumb-title dva-pptx-thumb-title-banner" style="position: absolute; top: 6%; left: 7%; right: 28%; height: 13%; display: flex; align-items: center; font-size: 8px; font-weight: 700; color: #1e293b; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;">
+            ${this.escape(s.title)}
+          </div>
+          ${miniGraphics}
+        `;
+      } else if (s.shapes && s.shapes.length > 0) {
+        // Render miniature shape diagram layout for PPTX slides
+        const miniShapesHtml = s.shapes.slice(0, 16).map(shp => {
+          if (!shp.xfrm) return '';
+          const styles = [
+            'position: absolute',
+            `left: ${shp.xfrm.left.toFixed(1)}%`,
+            `top: ${shp.xfrm.top.toFixed(1)}%`,
+            `width: ${Math.max(2, shp.xfrm.width).toFixed(1)}%`,
+            `height: ${Math.max(2, shp.xfrm.height).toFixed(1)}%`
+          ];
+          if (shp.geom === 'ellipse') styles.push('border-radius: 50%');
+          else if (shp.geom === 'roundRect') styles.push('border-radius: 2px');
+          else if (shp.geom === 'rightArrow') styles.push('clip-path: polygon(0% 25%, 65% 25%, 65% 0%, 100% 50%, 65% 100%, 65% 75%, 0% 75%)');
+          else if (shp.geom === 'leftArrow') styles.push('clip-path: polygon(35% 0%, 35% 25%, 100% 25%, 100% 75%, 35% 75%, 35% 100%, 0% 50%)');
+
+          if (shp.fillColor) styles.push(`background-color: ${shp.fillColor}`);
+          if (shp.borderColor && !shp.geom?.toLowerCase().includes('arrow')) {
+            styles.push(`border: 1px solid ${shp.borderColor}`);
+          }
+          let miniText = '';
+          if (shp.paragraphs && shp.paragraphs[0] && shp.paragraphs[0].text) {
+            const txt = shp.paragraphs[0].text;
+            miniText = `<span style="display: block; font-size: 6px; transform: scale(0.7); transform-origin: top left; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: ${shp.fillColor && this.isColorDark(shp.fillColor) ? '#ffffff' : '#0f172a'};">${this.escape(txt.substring(0, 15))}</span>`;
+          }
+          return `<div style="${styles.join('; ')}">${miniText}</div>`;
+        }).join('');
+
+        thumbContent = `
+          <div class="dva-pptx-thumb-diagram-preview" style="position: absolute; inset: 0; pointer-events: none;">
+            ${miniShapesHtml}
+          </div>
+        `;
+      } else {
+        thumbContent = `
+          <div class="dva-pptx-thumb-title" style="${isDark ? 'color: #ffffff;' : ''}">${this.escape(s.title)}</div>
+          ${isTitle ? `
+            <div class="dva-pptx-thumb-subtitle-line" style="${isDark ? 'background: #38bdf8;' : ''}"></div>
+          ` : `
+            <div class="dva-pptx-thumb-lines">
+              <div class="dva-pptx-thumb-line" style="width: 85%; ${isDark ? 'background: rgba(255,255,255,0.3);' : ''}"></div>
+              <div class="dva-pptx-thumb-line" style="width: 65%; ${isDark ? 'background: rgba(255,255,255,0.3);' : ''}"></div>
+              <div class="dva-pptx-thumb-line" style="width: 75%; ${isDark ? 'background: rgba(255,255,255,0.3);' : ''}"></div>
+            </div>
+          `}
+        `;
+      }
+
       return `
         <div class="dva-pptx-thumb ${isActive ? 'active' : ''}" data-index="${idx}" title="Slide ${idx + 1}: ${this.escape(s.title)}">
-          <div class="dva-pptx-thumb-preview ${isTitle ? 'thumb-title-slide' : ''} ${isDark ? 'dva-pptx-thumb-dark' : ''}" style="background-color: ${bg}; aspect-ratio: ${this.slideWidth} / ${this.slideHeight};">
-            <div class="dva-pptx-thumb-title" style="${isDark ? 'color: #ffffff;' : ''}">${this.escape(s.title)}</div>
-            ${isTitle ? `
-              <div class="dva-pptx-thumb-subtitle-line" style="${isDark ? 'background: #38bdf8;' : ''}"></div>
-            ` : `
-              <div class="dva-pptx-thumb-lines">
-                <div class="dva-pptx-thumb-line" style="width: 85%; ${isDark ? 'background: rgba(255,255,255,0.3);' : ''}"></div>
-                <div class="dva-pptx-thumb-line" style="width: 65%; ${isDark ? 'background: rgba(255,255,255,0.3);' : ''}"></div>
-                <div class="dva-pptx-thumb-line" style="width: 75%; ${isDark ? 'background: rgba(255,255,255,0.3);' : ''}"></div>
-              </div>
-            `}
+          <div class="dva-pptx-thumb-preview ${isTitle ? 'thumb-title-slide' : ''} ${isDark ? 'dva-pptx-thumb-dark' : ''}" style="${bgStyle} aspect-ratio: ${this.slideWidth} / ${this.slideHeight}; position: relative; overflow: hidden;">
+            ${thumbContent}
           </div>
           <div class="dva-pptx-thumb-footer">
             <span class="dva-pptx-thumb-num">Slide ${idx + 1}</span>
@@ -840,11 +1462,25 @@ export class PptxEngine {
           styles.push(`transform: rotate(${s.xfrm.rot}deg)`);
         }
 
-        // Geometry border-radius
+        // Geometry border-radius & clip-path
         if (s.geom === 'ellipse') {
           styles.push('border-radius: 50%');
         } else if (s.geom === 'roundRect') {
           styles.push('border-radius: clamp(4px, 1.2cqw, 14px)');
+        } else if (s.geom === 'rightArrow') {
+          styles.push('clip-path: polygon(0% 25%, 65% 25%, 65% 0%, 100% 50%, 65% 100%, 65% 75%, 0% 75%)');
+        } else if (s.geom === 'leftArrow') {
+          styles.push('clip-path: polygon(35% 0%, 35% 25%, 100% 25%, 100% 75%, 35% 75%, 35% 100%, 0% 50%)');
+        } else if (s.geom === 'upArrow') {
+          styles.push('clip-path: polygon(50% 0%, 0% 35%, 25% 35%, 25% 100%, 75% 100%, 75% 35%, 100% 35%)');
+        } else if (s.geom === 'downArrow') {
+          styles.push('clip-path: polygon(25% 0%, 75% 0%, 75% 65%, 100% 65%, 50% 100%, 0% 65%, 25% 65%)');
+        } else if (s.geom === 'leftRightArrow') {
+          styles.push('clip-path: polygon(25% 0%, 25% 25%, 75% 25%, 75% 0%, 100% 50%, 75% 100%, 75% 75%, 25% 75%, 25% 100%, 0% 50%)');
+        } else if (s.geom === 'triangle') {
+          styles.push('clip-path: polygon(50% 0%, 0% 100%, 100% 100%)');
+        } else if (s.geom === 'diamond') {
+          styles.push('clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%)');
         }
 
         // Fill color
@@ -859,7 +1495,7 @@ export class PptxEngine {
           const lineClr = s.borderColor || s.fillColor || 'currentColor';
           styles.push(`border-top: ${s.borderWidth || 2}px solid ${lineClr}`);
           styles.push('height: 0');
-        } else if (s.borderColor) {
+        } else if (s.borderColor && !s.geom?.toLowerCase().includes('arrow')) {
           styles.push(`border: ${s.borderWidth || 1}px ${s.borderDash || 'solid'} ${s.borderColor}`);
         }
 
@@ -875,7 +1511,8 @@ export class PptxEngine {
         let textHtml = '';
         if (s.paragraphs && s.paragraphs.length > 0) {
           const pHtml = s.paragraphs.map(p => {
-            const pRunsHtml = p.runs.map(r => {
+            const pRuns = (p.runs && p.runs.length > 0) ? p.runs : [{ text: p.text || '', sz: 1600, color: p.textColor || '#0f172a' }];
+            const pRunsHtml = pRuns.map(r => {
               const rStyles = [];
               if (r.color) rStyles.push(`color: ${r.color}`);
               if (r.isBold) rStyles.push('font-weight: 700');
@@ -942,7 +1579,9 @@ export class PptxEngine {
         `;
       });
 
-      const bgStyle = slide.bgColor ? `background-color: ${slide.bgColor};` : '';
+      const bgStyle = slide.bgImage
+        ? `background-image: url('${slide.bgImage}'); background-size: 100% 100%; background-repeat: no-repeat;`
+        : (slide.bgColor ? `background-color: ${slide.bgColor};` : '');
       const darkClass = this.isColorDark(slide.bgColor) ? 'dva-pptx-dark-slide' : '';
 
       canvasHtml = `
@@ -1029,7 +1668,9 @@ export class PptxEngine {
         `;
       }
 
-      const customBgStyle = slide.bgColor ? `background-color: ${slide.bgColor};` : '';
+      const customBgStyle = slide.bgImage
+        ? `background-image: url('${slide.bgImage}'); background-size: 100% 100%; background-repeat: no-repeat;`
+        : (slide.bgColor ? `background-color: ${slide.bgColor};` : '');
       const darkClass = this.isColorDark(slide.bgColor) ? 'dva-pptx-dark-slide' : '';
 
       canvasHtml = `

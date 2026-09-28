@@ -4140,6 +4140,11 @@ body.light-theme .dva-format-pill:hover {
   position: relative !important;
   container-type: inline-size;
   overflow: hidden !important;
+  width: auto;
+  height: 90%;
+  max-width: 95%;
+  max-height: 90%;
+  min-height: unset;
 }
 
 .dva-pptx-shape {
@@ -4156,7 +4161,7 @@ body.light-theme .dva-format-pill:hover {
   display: flex;
   flex-direction: column;
   box-sizing: border-box;
-  padding: 4px 6px;
+  padding: 4px 16px;
 }
 
 .dva-pptx-p {
@@ -4196,6 +4201,10 @@ body.light-theme .dva-format-pill:hover {
   position: absolute;
   box-sizing: border-box;
   overflow: auto;
+  background: #ffffff;
+  border: 1px solid var(--dva-border, #cbd5e1);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
 }
 
 .dva-pptx-thumb-dark .dva-pptx-thumb-title {

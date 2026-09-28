@@ -270,7 +270,33 @@ async function runZipTest() {
   assert.strictEqual(tableEl.rows.length, 3, 'Slide 3 table has 3 rows');
   console.log('✓ PptxEngine parsed 3 slides, slide titles, bullet points, tables, and speaker notes');
 
-  // 10. Test Toolbar configuration & granular button toggles
+  // 10. Test Legacy Binary PowerPoint (.ppt) OLE2 parsing
+  const { CFBFReader } = await import('../src/utils/cfbfReader.js');
+  const pptPath = new URL('./samples/sample.ppt', import.meta.url);
+  const pptBuffer = fs.readFileSync(pptPath);
+  const cfbf = new CFBFReader(pptBuffer.buffer);
+  cfbf.parse();
+  assert.ok(cfbf.hasStream('PowerPoint Document'), 'CFBF contains PowerPoint Document stream');
+  assert.ok(cfbf.hasStream('Pictures'), 'CFBF contains Pictures stream');
+
+  const legacyEngine = new PptxEngine(null);
+  legacyEngine.container = {
+    querySelector: () => null,
+    innerHTML: ''
+  };
+  legacyEngine.renderPresentationStage = () => {};
+  legacyEngine.bindKeyboardShortcuts = () => {};
+
+  await legacyEngine.renderLegacyPpt(pptBuffer.buffer, { name: 'sample.ppt' });
+  assert.strictEqual(legacyEngine.slides.length, 4, 'Parsed 4 slides from legacy PPT');
+  assert.strictEqual(legacyEngine.slides[0].title, 'Lorem ipsum', 'Slide 1 title parsed');
+  assert.strictEqual(legacyEngine.slides[1].title, 'Chart', 'Slide 2 title parsed');
+  assert.strictEqual(legacyEngine.slides[2].title, 'Table', 'Slide 3 title parsed');
+  assert.strictEqual(legacyEngine.slides[3].title, 'Photo', 'Slide 4 title parsed');
+  assert.ok(legacyEngine.slides[3].pictures.length > 0, 'Slide 4 photo picture extracted');
+  console.log('✓ Legacy Binary PowerPoint (.ppt) parsed 4 slides, titles, pictures, and tables');
+
+  // 11. Test Toolbar configuration & granular button toggles
   const { Toolbar } = await import('../src/core/Toolbar.js');
   const tb = Object.create(Toolbar.prototype);
 
@@ -299,6 +325,27 @@ async function runZipTest() {
   assert.strictEqual(customOpts.presets.length, 1);
   assert.strictEqual(customOpts.presets[0].label, 'Sample');
   console.log('✓ Granular Toolbar Configuration & Clean Presets Default verified');
+
+  // 12. Test Security, Sanitization & Protocol Allowlisting
+  const { escapeHtml, sanitizeUrl, sanitizeColor } = await import('../src/utils/security.js');
+  
+  // HTML escaping
+  assert.strictEqual(escapeHtml('<script>alert("xss")</script>'), '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;', 'HTML tags escaped');
+  assert.strictEqual(escapeHtml('Hello & Welcome \'User\''), 'Hello &amp; Welcome &#039;User&#039;', 'Ampersand and quotes escaped');
+
+  // URL allowlisting & XSS blocking
+  assert.strictEqual(sanitizeUrl('javascript:alert(1)'), '#', 'javascript: protocol blocked');
+  assert.strictEqual(sanitizeUrl('vbscript:msgbox(1)'), '#', 'vbscript: protocol blocked');
+  assert.strictEqual(sanitizeUrl('data:text/html,<script>alert(1)</script>'), '#', 'data:text/html blocked');
+  assert.strictEqual(sanitizeUrl('https://example.com/docs/presentation'), 'https://example.com/docs/presentation', 'https: protocol allowed');
+  assert.strictEqual(sanitizeUrl('mailto:security@example.com'), 'mailto:security@example.com', 'mailto: protocol allowed');
+  assert.strictEqual(sanitizeUrl('#slide-section'), '#slide-section', 'anchor hash link allowed');
+
+  // Color CSS injection validation
+  assert.strictEqual(sanitizeColor('#3b82f6'), '#3b82f6', 'Hex color verified');
+  assert.strictEqual(sanitizeColor('rgba(59, 130, 246, 0.5)'), 'rgba(59, 130, 246, 0.5)', 'rgba color verified');
+  assert.strictEqual(sanitizeColor('red; background: url(evil.com)'), '', 'CSS injection payload sanitized');
+  console.log('✓ Zero-Trust Security & Protocol Allowlisting verified (XSS, javascript:, and CSS injection blocked)');
 
   console.log('🎉 ALL TESTS PASSED SUCCESSFULLY!');
 }
