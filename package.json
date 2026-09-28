@@ -108,7 +108,7 @@
     "url": "https://github.com/VeereshPoojari/docview-all/issues"
   },
   "homepage": "https://veereshpoojari.github.io/docview-all/",
-  "license": "UNLICENSED",
+  "license": "MIT",
   "devDependencies": {
     "@rollup/plugin-commonjs": "^25.0.7",
     "@rollup/plugin-node-resolve": "^15.2.3",
