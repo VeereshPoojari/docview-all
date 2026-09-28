@@ -1,6 +1,6 @@
 {
   "name": "docview-all",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Universal, modern zero-dependency document and file viewer engine for all JavaScript frameworks and platforms (React, Vue, Angular, React Native, Svelte, Next.js, Vanilla). Supports 67+ formats including PDF, DOCX, XLSX, CSV, Draw.io (.drawio), Video with DASH/HLS, Audio, Code, Text & Images.",
   "type": "module",
   "main": "dist/index.js",
