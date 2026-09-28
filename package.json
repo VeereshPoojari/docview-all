@@ -75,7 +75,8 @@
     "node": ">=12.0.0"
   },
   "scripts": {
-    "build": "rollup -c",
+    "build": "rollup -c && node scripts/copyTypes.mjs",
+    "prepublishOnly": "npm run build",
     "dev": "rollup -c -w",
     "test": "node tests/engines.test.js"
   },

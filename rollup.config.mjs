@@ -20,6 +20,7 @@ const createFrameworkConfig = (input, outputDir, banner = undefined) => ({
       file: `dist/${outputDir}/index.js`,
       format: 'cjs',
       sourcemap: true,
+      exports: 'named',
       banner
     },
     {
@@ -50,13 +51,15 @@ export default [
       {
         file: 'dist/index.js',
         format: 'cjs',
-        sourcemap: true
+        sourcemap: true,
+        exports: 'named'
       },
       {
         file: 'dist/index.umd.js',
         format: 'umd',
         name: 'DocViewerAll',
-        sourcemap: true
+        sourcemap: true,
+        exports: 'named'
       }
     ],
     plugins: [
@@ -67,7 +70,7 @@ export default [
   },
 
   // 2. React Wrapper (with 'use client'; for Next.js App Router)
-  createFrameworkConfig('src/react/index.jsx', 'react', "'use client';"),
+  createFrameworkConfig('src/react/index.js', 'react', "'use client';"),
 
   // 3. Vue 3 Wrapper
   createFrameworkConfig('src/vue/index.js', 'vue'),
