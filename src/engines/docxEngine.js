@@ -88,12 +88,40 @@ export class DocxEngine {
     this.pageMode = 'elements'; // 'elements' | 'virtual'
     this.pageHeight = 1056;
     this.scrollHandler = null;
+    this.bookMode = !!(viewer && viewer.options && viewer.options.bookMode);
+  }
+
+  isBookMode() {
+    return !!this.bookMode;
+  }
+
+  setBookMode(enabled) {
+    this.bookMode = !!enabled;
+    if (this.container) {
+      this.container.classList.toggle('dva-book-mode', this.bookMode);
+    }
+    return this;
+  }
+
+  toggleBookMode() {
+    return this.setBookMode(!this.bookMode);
   }
 
   async render(fileInput, viewport) {
     this.container = document.createElement('div');
-    this.container.className = 'dva-docx-container';
+    this.container.className = this.bookMode ? 'dva-docx-container dva-book-mode' : 'dva-docx-container';
     viewport.appendChild(this.container);
+
+    // Ctrl + Wheel to zoom Word document smoothly
+    this.container.addEventListener('wheel', (e) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        const delta = e.deltaY < 0 ? 0.15 : -0.15;
+        if (this.viewer && typeof this.viewer.zoom === 'function') {
+          this.viewer.zoom(delta);
+        }
+      }
+    }, { passive: false });
 
     this.pagesContainer = document.createElement('div');
     this.pagesContainer.className = 'dva-docx-pages-wrapper';
@@ -542,30 +570,152 @@ export class DocxEngine {
       .replace(/"/g, '&quot;');
   }
 
+  splitDocxIntoPages() {
+    if (!this.pagesContainer) return;
+
+    const sections = Array.from(this.pagesContainer.querySelectorAll('section.docx, section.dva-docx-doc'));
+    if (sections.length === 0) return;
+
+    // Check if sections are already discrete multiple pages (each <= 1250px)
+    if (sections.length > 1 && sections.every(s => (s.offsetHeight || s.scrollHeight) <= 1250)) {
+      sections.forEach((sec, idx) => {
+        sec.classList.add('dva-docx-page');
+        sec.setAttribute('data-page', idx + 1);
+      });
+      return;
+    }
+
+    const allNewPageSections = [];
+
+    sections.forEach(sec => {
+      const article = sec.querySelector('article') || sec;
+      const children = Array.from(article.children);
+
+      const hasExplicitBreaks = sec.querySelectorAll('.docx-page-break, [style*="page-break"], hr.page-break').length > 0;
+      const totalHeight = sec.scrollHeight || sec.offsetHeight || 1056;
+
+      if (!hasExplicitBreaks && totalHeight <= 1200 && children.length <= 15) {
+        sec.classList.add('dva-docx-page');
+        allNewPageSections.push(sec);
+        return;
+      }
+
+      // Standard A4 printable height budget: 1056px total - 192px padding = 864px
+      const TARGET_PAGE_CONTENT_HEIGHT = 820;
+
+      const pageBatches = [];
+      let currentBatch = [];
+      let currentBatchHeight = 0;
+
+      children.forEach(child => {
+        const isExplicitBreak = child.classList.contains('docx-page-break') || 
+                                child.querySelector('.docx-page-break') !== null ||
+                                child.style.pageBreakBefore === 'always' ||
+                                child.style.breakBefore === 'page' ||
+                                child.getAttribute('data-break') === 'page';
+
+        let childHeight = child.offsetHeight || 0;
+        if (childHeight === 0) {
+          const textLength = (child.textContent || '').trim().length;
+          if (child.tagName === 'TABLE') {
+            const rows = child.querySelectorAll('tr').length || 1;
+            childHeight = rows * 36 + 24;
+          } else if (['H1', 'H2', 'H3'].includes(child.tagName)) {
+            childHeight = 54;
+          } else if (child.tagName === 'IMG') {
+            childHeight = child.height || 240;
+          } else {
+            childHeight = Math.max(26, Math.ceil(textLength / 80) * 24 + 12);
+          }
+        }
+
+        if (isExplicitBreak && currentBatch.length > 0) {
+          pageBatches.push(currentBatch);
+          currentBatch = [child];
+          currentBatchHeight = childHeight;
+          return;
+        }
+
+        if (currentBatchHeight + childHeight > TARGET_PAGE_CONTENT_HEIGHT && currentBatch.length > 0) {
+          pageBatches.push(currentBatch);
+          currentBatch = [child];
+          currentBatchHeight = childHeight;
+        } else {
+          currentBatch.push(child);
+          currentBatchHeight += childHeight;
+        }
+      });
+
+      if (currentBatch.length > 0) {
+        pageBatches.push(currentBatch);
+      }
+
+      if (pageBatches.length <= 1) {
+        sec.classList.add('dva-docx-page');
+        allNewPageSections.push(sec);
+      } else {
+        pageBatches.forEach(batch => {
+          const pageSec = document.createElement('section');
+          pageSec.className = 'docx dva-docx-doc dva-docx-page';
+          pageSec.style.width = '816px';
+          pageSec.style.minHeight = '1056px';
+          pageSec.style.margin = '0 auto 28px auto';
+          pageSec.style.boxSizing = 'border-box';
+          pageSec.style.padding = '72pt 72pt 72pt 72pt';
+          pageSec.style.background = '#ffffff';
+          pageSec.style.borderRadius = '4px';
+          pageSec.style.boxShadow = '0 4px 24px -2px rgba(15, 23, 42, 0.14), 0 2px 8px -1px rgba(15, 23, 42, 0.08)';
+          pageSec.style.border = '1px solid rgba(0, 0, 0, 0.08)';
+          pageSec.style.display = 'flex';
+          pageSec.style.flexDirection = 'column';
+          pageSec.style.justifyContent = 'space-between';
+          pageSec.style.position = 'relative';
+
+          const pageArticle = document.createElement('article');
+          pageArticle.className = 'dva-docx-article';
+          pageArticle.style.flex = '1';
+          batch.forEach(node => pageArticle.appendChild(node));
+          pageSec.appendChild(pageArticle);
+
+          allNewPageSections.push(pageSec);
+        });
+      }
+    });
+
+    this.pagesContainer.innerHTML = '';
+    const total = allNewPageSections.length;
+    allNewPageSections.forEach((pageCard, idx) => {
+      const pageNum = idx + 1;
+      pageCard.setAttribute('data-page', pageNum);
+
+      if (!pageCard.querySelector('.dva-docx-footer')) {
+        const footer = document.createElement('div');
+        footer.className = 'dva-docx-footer';
+        footer.innerHTML = `
+          <span>DocView-All Universal Viewer</span>
+          <span class="dva-docx-page-num">Page ${pageNum} of ${total}</span>
+        `;
+        pageCard.appendChild(footer);
+      } else {
+        const numEl = pageCard.querySelector('.dva-docx-page-num');
+        if (numEl) numEl.textContent = `Page ${pageNum} of ${total}`;
+      }
+
+      this.pagesContainer.appendChild(pageCard);
+    });
+  }
+
   initPagination() {
     if (!this.pagesContainer) return;
 
-    // 1. Check for distinct section pages or OpenXML page divs
-    const sections = Array.from(this.pagesContainer.querySelectorAll('section.docx, .dva-docx-page'));
-    const pageBreaks = Array.from(this.pagesContainer.querySelectorAll('.docx-page-break, [style*="page-break"], hr.page-break'));
+    // Split continuous Word document flow into discrete A4 page cards
+    this.splitDocxIntoPages();
 
-    if (sections.length > 1) {
-      this.pageElements = sections;
-      this.totalPages = sections.length;
-      this.pageMode = 'elements';
-    } else if (pageBreaks.length > 0) {
-      this.pageElements = [this.pagesContainer.firstElementChild || sections[0], ...pageBreaks];
-      this.totalPages = this.pageElements.length;
-      this.pageMode = 'elements';
-    } else {
-      // Continuous Word flow: calculate pages based on scrollHeight vs standard A4 height (1056px at 96 DPI)
-      const scrollH = this.pagesContainer.scrollHeight || (sections[0] && sections[0].scrollHeight) || 1056;
-      const PAGE_HEIGHT = 1056;
-      this.pageHeight = PAGE_HEIGHT;
-      this.totalPages = Math.max(1, Math.ceil(scrollH / PAGE_HEIGHT));
-      this.pageMode = 'virtual';
-      this.pageElements = [];
-    }
+    const sections = Array.from(this.pagesContainer.querySelectorAll('section.docx, section.dva-docx-doc, .dva-docx-page'));
+
+    this.pageElements = sections;
+    this.totalPages = Math.max(1, sections.length);
+    this.pageMode = 'elements';
 
     this.currentPage = 1;
     if (this.viewer && typeof this.viewer.setPageInfo === 'function') {
@@ -643,7 +793,8 @@ export class DocxEngine {
   updateTransform() {
     if (!this.pagesContainer) return;
     const scale = this.viewer.scale || 1;
-    const rotation = this.viewer.rotation || 0;
+    const rotation = (this.viewer.rotation || 0) % 360;
+    this.pagesContainer.style.transformOrigin = 'top center';
     this.pagesContainer.style.transform = `scale(${scale}) rotate(${rotation}deg)`;
   }
 

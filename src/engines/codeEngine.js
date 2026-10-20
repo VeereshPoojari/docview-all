@@ -263,6 +263,21 @@ export class CodeEngine {
         }
       };
     }
+
+    // Ctrl + Wheel to zoom in/out smoothly
+    if (this.container) {
+      this.container.addEventListener('wheel', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          const delta = e.deltaY < 0 ? 0.15 : -0.15;
+          if (this.viewer && typeof this.viewer.zoom === 'function') {
+            this.viewer.zoom(delta);
+          }
+        }
+      }, { passive: false });
+    }
+
+    this.updateTransform();
   }
 
   async renderStudioIoArchive(fileInput) {
@@ -440,6 +455,34 @@ export class CodeEngine {
     }
 
     return escaped;
+  }
+
+  updateTransform() {
+    if (!this.container) return;
+    const tableWrap = this.container.querySelector('.dva-code-table-wrap');
+    const table = this.container.querySelector('#dva-code-table');
+    if (!tableWrap || !table) return;
+
+    const scale = this.viewer.scale || 1.0;
+    const rotation = (this.viewer.rotation || 0) % 360;
+
+    // Use CSS zoom when supported for crisp high-DPI text scaling
+    if ('zoom' in table.style) {
+      table.style.zoom = `${scale}`;
+    } else {
+      table.style.transformOrigin = 'top left';
+      table.style.transform = `scale(${scale})`;
+    }
+
+    if (rotation !== 0) {
+      tableWrap.style.transformOrigin = 'center center';
+      tableWrap.style.transform = `rotate(${rotation}deg)`;
+      tableWrap.style.margin = '40px auto';
+    } else {
+      tableWrap.style.transformOrigin = 'top left';
+      tableWrap.style.transform = 'none';
+      tableWrap.style.margin = '0';
+    }
   }
 
   destroy() {

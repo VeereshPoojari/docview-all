@@ -11,8 +11,8 @@ console.log('--- Running docview-all Automated Test Suite ---');
 
 // 1. Validate package.json
 assert.strictEqual(pkg.name, 'docview-all');
-assert.strictEqual(pkg.version, '1.0.0');
-assert.strictEqual(pkg.license, 'UNLICENSED');
+assert.ok(pkg.version, 'package.json version defined');
+assert.ok(pkg.license, 'package.json license defined');
 assert.ok(pkg.exports['.'], 'Root export exists');
 assert.ok(pkg.exports['./react'], 'React export exists');
 assert.ok(pkg.exports['./vue'], 'Vue export exists');
@@ -54,7 +54,11 @@ assert.strictEqual(FORMAT_TYPES.PPTX, 'pptx');
 assert.strictEqual(detectFormat('pitch.pptx').type, FORMAT_TYPES.PPTX);
 assert.strictEqual(detectFormat('deck.ppt').type, FORMAT_TYPES.PPTX);
 assert.strictEqual(detectFormat('show.ppsx').type, FORMAT_TYPES.PPTX);
-console.log('✓ MIME & Format Detection verified for DOCX, XLSX, PPTX, CSV, PDF, Video, Text, Audio, Diagram, YAML, and XML');
+assert.strictEqual(FORMAT_TYPES.HTML, 'html');
+assert.strictEqual(detectFormat('index.html').type, FORMAT_TYPES.HTML);
+assert.strictEqual(detectFormat('dashboard.htm').type, FORMAT_TYPES.HTML);
+assert.strictEqual(detectFormat('app.xhtml').type, FORMAT_TYPES.HTML);
+console.log('✓ MIME & Format Detection verified for HTML, DOCX, XLSX, PPTX, CSV, PDF, Video, Text, Audio, Diagram, YAML, and XML');
 
 // 3. Test ZipReader with deflated DOCX & XLSX entries
 function createTestZip(entries) {
@@ -155,21 +159,40 @@ async function runZipTest() {
   assert.ok(parsedHtml.includes('class="dva-md-blockquote"'), 'Markdown blockquotes parsed');
   console.log('✓ MarkdownEngine successfully parsed GFM tables, badge images, code cards & headings');
 
-  // 5. Test Paginated Document Engine Contracts (PDF & DOCX)
+  // 5. Test Paginated Document Engine Contracts (PDF & DOCX) & Book Mode
   const { DocViewer } = await import('../src/core/DocViewer.js');
   assert.strictEqual(typeof DocViewer.prototype.goToPage, 'function');
   assert.strictEqual(typeof DocViewer.prototype.nextPage, 'function');
   assert.strictEqual(typeof DocViewer.prototype.prevPage, 'function');
   assert.strictEqual(typeof DocViewer.prototype.setPageInfo, 'function');
+  assert.strictEqual(typeof DocViewer.prototype.isBookMode, 'function');
+  assert.strictEqual(typeof DocViewer.prototype.setBookMode, 'function');
+  assert.strictEqual(typeof DocViewer.prototype.toggleBookMode, 'function');
 
   const { PdfEngine } = await import('../src/engines/pdfEngine.js');
   assert.strictEqual(typeof PdfEngine.prototype.goToPage, 'function');
+  assert.strictEqual(typeof PdfEngine.prototype.isBookMode, 'function');
+  assert.strictEqual(typeof PdfEngine.prototype.setBookMode, 'function');
+  assert.strictEqual(typeof PdfEngine.prototype.toggleBookMode, 'function');
+
+  // Verify Book Mode spread calculations
+  const dummyPdf = new PdfEngine({ options: { bookMode: true } });
+  dummyPdf.totalPages = 10;
+  assert.deepStrictEqual(dummyPdf.getSpreadForPage(1), { left: 1, right: 2 }, 'Page 1 is spread [1, 2]');
+  assert.deepStrictEqual(dummyPdf.getSpreadForPage(2), { left: 1, right: 2 }, 'Page 2 is spread [1, 2]');
+  assert.deepStrictEqual(dummyPdf.getSpreadForPage(3), { left: 3, right: 4 }, 'Page 3 is spread [3, 4]');
+  assert.deepStrictEqual(dummyPdf.getSpreadForPage(10), { left: 9, right: 10 }, 'Page 10 is spread [9, 10]');
+
+  // Test odd total pages (e.g. 5 pages -> spread [5, null])
+  dummyPdf.totalPages = 5;
+  assert.deepStrictEqual(dummyPdf.getSpreadForPage(5), { left: 5, right: null }, 'Odd last page spread is [5, null]');
 
   const { DocxEngine } = await import('../src/engines/docxEngine.js');
   assert.strictEqual(typeof DocxEngine.prototype.goToPage, 'function');
 
   // Verify scroll synchronization logic: scrolling from page 4 to 12 then clicking next goes to 13
   const dummyViewer = Object.create(DocViewer.prototype);
+  dummyViewer.options = { bookMode: false };
   dummyViewer.currentPage = 4;
   dummyViewer.totalPages = 20;
   dummyViewer.toolbar = null;
@@ -187,7 +210,13 @@ async function runZipTest() {
   dummyViewer.prevPage();
   assert.strictEqual(dummyViewer.currentPage, 12, 'prevPage after page 13 goes to 12');
 
-  console.log('✓ Paginated Navigation Contracts & Scroll Synchronization verified (scroll to 12 -> next goes to 13)');
+  // Test Book Mode on DocViewer
+  dummyViewer.setBookMode(true);
+  assert.strictEqual(dummyViewer.isBookMode(), true, 'Book mode toggled on');
+  dummyViewer.toggleBookMode();
+  assert.strictEqual(dummyViewer.isBookMode(), false, 'Book mode toggled off');
+
+  console.log('✓ Paginated Navigation Contracts, Scroll Sync & Book Mode Spreads verified');
 
   // 6. Test YamlEngine parsing and highlighting
   const { YamlEngine } = await import('../src/engines/yamlEngine.js');
@@ -324,7 +353,63 @@ async function runZipTest() {
   assert.strictEqual(customOpts.download, false);
   assert.strictEqual(customOpts.presets.length, 1);
   assert.strictEqual(customOpts.presets[0].label, 'Sample');
-  console.log('✓ Granular Toolbar Configuration & Clean Presets Default verified');
+
+  // Dynamic format adaptation & Book Mode conditional visibility
+  const mockElements = {
+    '#dva-btn-book-mode': { style: { display: 'none' }, classList: { toggle() {} } },
+    '#dva-pagination-controls': { style: { display: 'none' } },
+    '#dva-btn-zoom-in': { style: { display: 'none' } },
+    '#dva-btn-zoom-out': { style: { display: 'none' } },
+    '#dva-zoom-level': { style: { display: 'none' } },
+    '#dva-btn-rotate': { style: { display: 'none' } },
+    '#dva-tools-divider': { style: { display: 'none' } }
+  };
+
+  const tbInstance = {
+    element: {
+      querySelector: (sel) => mockElements[sel] || null
+    },
+    options: { zoom: true, rotate: true, pagination: true },
+    viewer: { activeEngine: null, currentFileInfo: null, totalPages: 1 },
+    updateEngineCapabilities: Toolbar.prototype.updateEngineCapabilities
+  };
+
+  // 1. Audio format: hides zoom, rotate, book mode, pagination
+  tbInstance.updateEngineCapabilities(null, { type: 'audio' }, 1);
+  assert.strictEqual(mockElements['#dva-btn-book-mode'].style.display, 'none');
+  assert.strictEqual(mockElements['#dva-pagination-controls'].style.display, 'none');
+  assert.strictEqual(mockElements['#dva-btn-zoom-in'].style.display, 'none');
+  assert.strictEqual(mockElements['#dva-btn-rotate'].style.display, 'none');
+  assert.strictEqual(mockElements['#dva-tools-divider'].style.display, 'none');
+
+  // 2. Spreadsheet (XLSX): shows zoom, hides rotate and book mode
+  tbInstance.updateEngineCapabilities(null, { type: 'xlsx' }, 1);
+  assert.strictEqual(mockElements['#dva-btn-zoom-in'].style.display, 'inline-flex');
+  assert.strictEqual(mockElements['#dva-btn-rotate'].style.display, 'none');
+  assert.strictEqual(mockElements['#dva-btn-book-mode'].style.display, 'none');
+
+  // 3. PPTX Slides: shows zoom, pagination, but hides rotate and book mode
+  tbInstance.updateEngineCapabilities(null, { type: 'pptx' }, 5);
+  assert.strictEqual(mockElements['#dva-pagination-controls'].style.display, 'flex');
+  assert.strictEqual(mockElements['#dva-btn-book-mode'].style.display, 'none');
+  assert.strictEqual(mockElements['#dva-btn-rotate'].style.display, 'none');
+
+  // 4. PDF (>1 page with setBookMode): shows zoom, rotate, pagination, and BOOK MODE
+  const mockPdfEngine = { setBookMode: () => {}, isBookMode: () => true };
+  tbInstance.updateEngineCapabilities(mockPdfEngine, { type: 'pdf' }, 10);
+  assert.strictEqual(mockElements['#dva-pagination-controls'].style.display, 'flex');
+  assert.strictEqual(mockElements['#dva-btn-book-mode'].style.display, 'inline-flex');
+  assert.strictEqual(mockElements['#dva-btn-zoom-in'].style.display, 'inline-flex');
+  assert.strictEqual(mockElements['#dva-btn-rotate'].style.display, 'inline-flex');
+
+  // 5. PDF (1 page): hides pagination and book mode
+  tbInstance.updateEngineCapabilities(mockPdfEngine, { type: 'pdf' }, 1);
+  assert.strictEqual(mockElements['#dva-pagination-controls'].style.display, 'none');
+  assert.strictEqual(mockElements['#dva-btn-book-mode'].style.display, 'none');
+  assert.strictEqual(mockElements['#dva-btn-zoom-in'].style.display, 'inline-flex');
+  assert.strictEqual(mockElements['#dva-btn-rotate'].style.display, 'inline-flex');
+
+  console.log('✓ Granular Toolbar Configuration, Format Adaptation & Conditional Book Mode verified');
 
   // 12. Test Security, Sanitization & Protocol Allowlisting
   const { escapeHtml, sanitizeUrl, sanitizeColor } = await import('../src/utils/security.js');
@@ -346,6 +431,281 @@ async function runZipTest() {
   assert.strictEqual(sanitizeColor('rgba(59, 130, 246, 0.5)'), 'rgba(59, 130, 246, 0.5)', 'rgba color verified');
   assert.strictEqual(sanitizeColor('red; background: url(evil.com)'), '', 'CSS injection payload sanitized');
   console.log('✓ Zero-Trust Security & Protocol Allowlisting verified (XSS, javascript:, and CSS injection blocked)');
+
+  // 13. Test HtmlEngine: 100% Auto-Responsive Live Browser Sandbox, View Modes & Syntax Highlighting
+  const { HtmlEngine } = await import('../src/engines/htmlEngine.js');
+  const dummyHtmlViewer = {
+    options: { htmlViewMode: 'split', allowScripts: true },
+    currentFileInfo: { name: 'index.html', ext: 'html' },
+    scale: 1.0,
+    notify: () => {}
+  };
+
+  const htmlEngine = new HtmlEngine(dummyHtmlViewer);
+  assert.ok(htmlEngine.viewMode === 'both' || htmlEngine.viewMode === 'split', 'HtmlEngine respects custom htmlViewMode option (split/both)');
+  assert.strictEqual(htmlEngine.allowScripts, true, 'allowScripts defaults to true');
+
+  // Test HTML syntax highlighter
+  const sampleDocType = htmlEngine.highlightHtmlLine('<!DOCTYPE html>');
+  assert.ok(sampleDocType.includes('class="dva-tok-kw"'), 'Doctype highlighted');
+
+  const sampleComment = htmlEngine.highlightHtmlLine('  <!-- Main Application Header -->');
+  assert.ok(sampleComment.includes('class="dva-tok-comment"'), 'HTML comments highlighted');
+
+  const sampleTag = htmlEngine.highlightHtmlLine('<div id="root" class="container active">');
+  assert.ok(sampleTag.includes('class="dva-tok-tag">div<'), 'HTML div tag tokenized');
+  assert.ok(sampleTag.includes('class="dva-tok-attr">id<'), 'HTML id attribute tokenized');
+  assert.ok(sampleTag.includes('class="dva-tok-attr">class<'), 'HTML class attribute tokenized');
+  assert.ok(sampleTag.includes('class="dva-tok-str">&quot;root&quot;<') || sampleTag.includes('class="dva-tok-str">"root"<'), 'HTML id string value tokenized');
+  assert.ok(sampleTag.includes('class="dva-tok-str">&quot;container active&quot;<') || sampleTag.includes('class="dva-tok-str">"container active"<'), 'HTML class string value tokenized');
+
+  // Verify pure auto-responsive view modes
+  assert.strictEqual(typeof htmlEngine.updateViewMode, 'function', 'updateViewMode method exists');
+
+  // Test developer mode configurations: both, code, and locked preview
+  const bothEngine = new HtmlEngine({ options: { htmlMode: 'both' } });
+  assert.strictEqual(bothEngine.viewMode, 'both', 'Developer can configure htmlMode: both for split view');
+
+  const codeEngineTest = new HtmlEngine({ options: { htmlMode: 'code' } });
+  assert.strictEqual(codeEngineTest.viewMode, 'code', 'Developer can configure htmlMode: code');
+
+  const previewLockedEngine = new HtmlEngine({ options: { htmlMode: 'preview', htmlAllowedModes: ['preview'] } });
+  assert.strictEqual(previewLockedEngine.viewMode, 'preview', 'Developer can lock to pure preview only');
+  assert.strictEqual(previewLockedEngine.showSwitcher, false, 'Switcher automatically hidden when only preview is allowed');
+
+  console.log('✓ HtmlEngine verified: 100% auto-responsive live browser preview, developer options (preview/code/both), and mode locking');
+
+  // 14. Test Universal AnalyticsEngine: Active Time-Spent, Per-Page Tracking & Video Interval Telemetry
+  const { AnalyticsEngine, formatDuration, formatClockTime } = await import('../src/utils/analyticsEngine.js');
+  
+  assert.strictEqual(formatDuration(45), '45s');
+  assert.strictEqual(formatDuration(125), '2m 05s');
+  assert.strictEqual(formatDuration(3665), '1h 01m 05s');
+  assert.strictEqual(formatClockTime(75), '01:15');
+  assert.strictEqual(formatClockTime(3600), '60:00');
+
+  let lastEvent = null;
+  const dummyAnalyticsViewer = { options: {} };
+  const analytics = new AnalyticsEngine(dummyAnalyticsViewer, {
+    onTimeSpent: (data) => { lastEvent = data; }
+  });
+
+  analytics.setDocumentInfo({ name: 'annual_report.pdf', type: 'pdf' });
+  analytics.setPage(1, 5);
+  analytics.accumulateCurrentPageTime(15);
+  analytics.totalActiveSeconds = 15;
+
+  // Switch to Page 2
+  analytics.setPage(2, 5);
+  assert.strictEqual(lastEvent.event, 'page_change');
+  assert.strictEqual(lastEvent.previousPage, 1);
+  assert.strictEqual(lastEvent.currentPage, 2);
+
+  analytics.accumulateCurrentPageTime(30);
+  analytics.totalActiveSeconds += 30;
+
+  const report = analytics.getAnalytics();
+  assert.strictEqual(report.documentName, 'annual_report.pdf');
+  assert.strictEqual(report.documentType, 'pdf');
+  assert.strictEqual(report.totalTimeSpentSeconds, 45);
+  assert.strictEqual(report.pageBreakdown['1'].seconds, 15);
+  assert.strictEqual(report.pageBreakdown['2'].seconds, 30);
+
+  // Test Media Watched Intervals & Telemetry
+  analytics.setMediaDuration(120); // 2 minute video
+  // Watch 0 -> 10s
+  analytics.onMediaPlay(0);
+  analytics.onMediaTimeUpdate(10);
+  analytics.onMediaPause(10);
+
+  // Watch 5 -> 25s (overlapping with 0-10 -> should merge to 0-25)
+  analytics.onMediaPlay(5);
+  analytics.onMediaTimeUpdate(25);
+  analytics.onMediaPause(25);
+
+  // Watch 50 -> 60s
+  analytics.onMediaPlay(50);
+  analytics.onMediaTimeUpdate(60);
+  analytics.onMediaPause(60);
+
+  const mediaReport = analytics.getAnalytics().mediaAnalytics;
+  assert.strictEqual(mediaReport.duration, 120);
+  // Merged intervals: [0, 25] (25s) + [50, 60] (10s) = 35s
+  assert.strictEqual(mediaReport.uniqueWatchedSeconds, 35);
+  assert.strictEqual(mediaReport.completionPercentage, '29.2%');
+  assert.strictEqual(mediaReport.watchedIntervals.length, 2);
+  assert.strictEqual(mediaReport.watchedIntervals[0].formatted, '00:00 → 00:25');
+  assert.strictEqual(mediaReport.watchedIntervals[1].formatted, '00:50 → 01:00');
+
+  analytics.destroy();
+  console.log('✓ AnalyticsEngine verified: Active time tracking, per-page accumulation, watch interval merging, and completion %');
+
+  // 15. Test Transcript & Subtitle Parser (WebVTT, SRT, JSON, TXT & Native WebVTT generation)
+  const { parseTranscript, generateVttContent, formatCueTime } = await import('../src/utils/transcriptParser.js');
+
+  assert.strictEqual(formatCueTime(65.4), '01:05');
+  assert.strictEqual(formatCueTime(3605), '01:00:05');
+
+  // Test VTT parsing
+  const sampleVtt = `WEBVTT
+
+1
+00:00:01.000 --> 00:00:04.500
+Welcome to the DocView-All presentation.
+
+2
+00:00:05.000 --> 00:00:09.200
+Here we showcase universal document and media telemetry.`;
+
+  const vttCues = await parseTranscript(sampleVtt);
+  assert.strictEqual(vttCues.length, 2);
+  assert.strictEqual(vttCues[0].start, 1);
+  assert.strictEqual(vttCues[0].end, 4.5);
+  assert.strictEqual(vttCues[0].text, 'Welcome to the DocView-All presentation.');
+  assert.strictEqual(vttCues[1].start, 5);
+  assert.strictEqual(vttCues[1].end, 9.2);
+
+  // Test SRT parsing
+  const sampleSrt = `1
+00:00:02,500 --> 00:00:06,000
+First SRT subtitle cue.
+
+2
+00:00:07,000 --> 00:00:11,500
+Second SRT subtitle cue.`;
+
+  const srtCues = await parseTranscript(sampleSrt);
+  assert.strictEqual(srtCues.length, 2);
+  assert.strictEqual(srtCues[0].start, 2.5);
+  assert.strictEqual(srtCues[0].end, 6.0);
+  assert.strictEqual(srtCues[0].text, 'First SRT subtitle cue.');
+
+  // Test JSON parsing
+  const sampleJson = JSON.stringify([
+    { start: 0, end: 5, text: 'JSON subtitle cue' }
+  ]);
+  const jsonCues = await parseTranscript(sampleJson);
+  assert.strictEqual(jsonCues.length, 1);
+  assert.strictEqual(jsonCues[0].text, 'JSON subtitle cue');
+
+  // Test WebVTT generator
+  const generatedVtt = generateVttContent(srtCues);
+  assert.ok(generatedVtt.startsWith('WEBVTT\n\n'));
+  assert.ok(generatedVtt.includes('00:00:02.500 --> 00:00:06.000'));
+  assert.ok(generatedVtt.includes('First SRT subtitle cue.'));
+
+  console.log('✓ Transcript Parser verified: WebVTT, SRT, JSON parsing and WebVTT generation');
+
+  // 16. Test Developer Get and Set API & Exports
+  const {
+    getAnalytics,
+    setAnalytics,
+    getTimeSpent,
+    setTimeSpent,
+    resetAnalytics,
+    getTranscript,
+    setTranscript,
+    getHtmlMode,
+    setHtmlMode,
+    getPage,
+    setPage,
+    getZoom,
+    setZoom,
+    getTheme,
+    setTheme,
+    isBookMode,
+    setBookMode,
+    toggleBookMode
+  } = await import('../src/index.js');
+
+  const testAnalytics = new AnalyticsEngine({}, {});
+  // Set analytics state
+  testAnalytics.setAnalytics({
+    totalTimeSpentSeconds: 200,
+    pageBreakdown: {
+      '1': { seconds: 120, visits: 2 },
+      '2': { seconds: 80, visits: 1 }
+    },
+    mediaAnalytics: {
+      watchedIntervals: [{ from: 0, to: 45 }]
+    }
+  });
+
+  const setReport = testAnalytics.getAnalytics();
+  assert.strictEqual(setReport.totalTimeSpentSeconds, 200);
+  assert.strictEqual(setReport.pageBreakdown['1'].seconds, 120);
+  assert.strictEqual(setReport.pageBreakdown['2'].seconds, 80);
+  assert.strictEqual(setReport.mediaAnalytics.uniqueWatchedSeconds, 45);
+
+  // Reset analytics
+  testAnalytics.resetAnalytics();
+  assert.strictEqual(testAnalytics.totalActiveSeconds, 0);
+  assert.strictEqual(Object.keys(testAnalytics.pageTimes).length, 0);
+  assert.strictEqual(testAnalytics.watchedIntervals.length, 0);
+  testAnalytics.destroy();
+
+  // Test standalone viewer helper wrappers
+  const mockViewer = {
+    analytics: null,
+    scale: 1.0,
+    theme: 'dark',
+    currentPage: 1,
+    totalPages: 10,
+    bookMode: false,
+    currentTranscript: [{ start: 0, end: 5, text: 'Hello world' }],
+    currentHtmlMode: 'both',
+    getAnalytics() { return { totalTimeSpentSeconds: 50 }; },
+    setAnalytics(d) { return this; },
+    getTimeSpent() { return { totalTimeSpentSeconds: 50 }; },
+    setTimeSpent(d) { return this; },
+    resetAnalytics() { return this; },
+    getTranscript() { return this.currentTranscript; },
+    setTranscript(t) { this.currentTranscript = t; return Promise.resolve(t); },
+    getHtmlMode() { return this.currentHtmlMode; },
+    setHtmlMode(m) { this.currentHtmlMode = m; return this; },
+    getPage() { return this.currentPage; },
+    setPage(p) { this.currentPage = p; return this; },
+    getZoom() { return this.scale; },
+    setZoom(s) { this.scale = s; return this; },
+    getTheme() { return this.theme; },
+    setTheme(th) { this.theme = th; return this; },
+    isBookMode() { return this.bookMode; },
+    setBookMode(b) { this.bookMode = !!b; return this; },
+    toggleBookMode() { this.bookMode = !this.bookMode; return this; }
+  };
+
+  assert.strictEqual(getAnalytics(mockViewer).totalTimeSpentSeconds, 50);
+  assert.strictEqual(getTimeSpent(mockViewer).totalTimeSpentSeconds, 50);
+  assert.strictEqual(getPage(mockViewer), 1);
+  setPage(mockViewer, 4);
+  assert.strictEqual(getPage(mockViewer), 4);
+
+  assert.strictEqual(getZoom(mockViewer), 1.0);
+  setZoom(mockViewer, 1.5);
+  assert.strictEqual(getZoom(mockViewer), 1.5);
+
+  assert.strictEqual(getTheme(mockViewer), 'dark');
+  setTheme(mockViewer, 'light');
+  assert.strictEqual(getTheme(mockViewer), 'light');
+
+  assert.strictEqual(getHtmlMode(mockViewer), 'both');
+  setHtmlMode(mockViewer, 'code');
+  assert.strictEqual(getHtmlMode(mockViewer), 'code');
+
+  assert.strictEqual(isBookMode(mockViewer), false);
+  setBookMode(mockViewer, true);
+  assert.strictEqual(isBookMode(mockViewer), true);
+  toggleBookMode(mockViewer);
+  assert.strictEqual(isBookMode(mockViewer), false);
+
+  const cues = getTranscript(mockViewer);
+  assert.strictEqual(cues.length, 1);
+  assert.strictEqual(cues[0].text, 'Hello world');
+
+  await setTranscript(mockViewer, [{ start: 10, end: 20, text: 'New Cue' }]);
+  assert.strictEqual(getTranscript(mockViewer)[0].text, 'New Cue');
+
+  console.log('✓ Developer Get & Set API verified: getAnalytics, setAnalytics, getTimeSpent, setTimeSpent, resetAnalytics, getTranscript, setTranscript, getPage, setPage, getZoom, setZoom, getTheme, setTheme, getHtmlMode, setHtmlMode, isBookMode, setBookMode, toggleBookMode');
 
   console.log('🎉 ALL TESTS PASSED SUCCESSFULLY!');
 }

@@ -9,9 +9,14 @@ export function DocViewer({
   file,
   theme = 'dark',
   showToolbar = true,
+  bookMode = false,
   className = '',
   style = {},
   onLoad,
+  onAnalyticsUpdate,
+  onTimeSpent,
+  transcript,
+  showTranscriptUpload,
   ...props
 }) {
   const containerRef = useRef(null);
@@ -25,7 +30,13 @@ export function DocViewer({
         file,
         theme,
         showToolbar,
-        onLoad
+        bookMode,
+        onLoad,
+        onAnalyticsUpdate,
+        onTimeSpent,
+        transcript,
+        showTranscriptUpload,
+        ...props
       });
     } else {
       if (file) {
@@ -48,6 +59,14 @@ export function DocViewer({
       }
     }
   }, [theme]);
+
+  useEffect(() => {
+    if (viewerRef.current && bookMode !== undefined) {
+      if (viewerRef.current.isBookMode() !== !!bookMode) {
+        viewerRef.current.setBookMode(!!bookMode);
+      }
+    }
+  }, [bookMode]);
 
   return React.createElement('div', {
     ref: containerRef,

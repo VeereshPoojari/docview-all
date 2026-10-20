@@ -192,10 +192,23 @@ export class AudioEngine {
       }
     };
 
-    this.audio.onplay = () => updatePlayState(true);
-    this.audio.onpause = () => updatePlayState(false);
+    this.audio.onplay = () => {
+      updatePlayState(true);
+      if (this.viewer?.analytics) {
+        this.viewer.analytics.onMediaPlay(this.audio.currentTime);
+      }
+    };
+    this.audio.onpause = () => {
+      updatePlayState(false);
+      if (this.viewer?.analytics) {
+        this.viewer.analytics.onMediaPause(this.audio.currentTime);
+      }
+    };
     this.audio.onended = () => {
       updatePlayState(false);
+      if (this.viewer?.analytics) {
+        this.viewer.analytics.onMediaPause(this.audio.currentTime);
+      }
       if (!this.isLooping) {
         this.audio.currentTime = 0;
       }
@@ -204,9 +217,15 @@ export class AudioEngine {
     // Duration Loaded
     this.audio.onloadedmetadata = () => {
       durTimeEl.textContent = formatTime(this.audio.duration);
+      if (this.viewer?.analytics) {
+        this.viewer.analytics.setMediaDuration(this.audio.duration);
+      }
     };
     if (this.audio.duration) {
       durTimeEl.textContent = formatTime(this.audio.duration);
+      if (this.viewer?.analytics) {
+        this.viewer.analytics.setMediaDuration(this.audio.duration);
+      }
     }
 
     // Time Update
@@ -217,6 +236,9 @@ export class AudioEngine {
           const pct = (this.audio.currentTime / this.audio.duration) * 100;
           progressSlider.value = pct;
         }
+      }
+      if (this.viewer?.analytics) {
+        this.viewer.analytics.onMediaTimeUpdate(this.audio.currentTime);
       }
     };
 
@@ -234,14 +256,23 @@ export class AudioEngine {
         this.audio.currentTime = (progressSlider.value / 100) * this.audio.duration;
       }
       this.isSeeking = false;
+      if (this.viewer?.analytics) {
+        this.viewer.analytics.onMediaSeeked(this.audio.currentTime);
+      }
     };
 
     // Skip Buttons
     rewindBtn.onclick = () => {
       this.audio.currentTime = Math.max(0, this.audio.currentTime - 10);
+      if (this.viewer?.analytics) {
+        this.viewer.analytics.onMediaSeeked(this.audio.currentTime);
+      }
     };
     forwardBtn.onclick = () => {
       this.audio.currentTime = Math.min(this.audio.duration || 999999, this.audio.currentTime + 10);
+      if (this.viewer?.analytics) {
+        this.viewer.analytics.onMediaSeeked(this.audio.currentTime);
+      }
     };
 
     // Loop Button

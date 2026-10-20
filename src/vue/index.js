@@ -17,15 +17,32 @@ export const DocViewer = {
     showToolbar: {
       type: Boolean,
       default: true
+    },
+    transcript: {
+      type: [String, Object, Array],
+      default: null
+    },
+    showTranscriptUpload: {
+      type: Boolean,
+      default: true
+    },
+    bookMode: {
+      type: Boolean,
+      default: false
     }
   },
-  emits: ['load'],
+  emits: ['load', 'analytics-update', 'time-spent'],
   mounted() {
     this.viewer = new CoreViewer(this.$el, {
       file: this.file,
       theme: this.theme,
       showToolbar: this.showToolbar,
-      onLoad: (info) => this.$emit('load', info)
+      bookMode: this.bookMode,
+      transcript: this.transcript,
+      showTranscriptUpload: this.showTranscriptUpload,
+      onLoad: (info) => this.$emit('load', info),
+      onAnalyticsUpdate: (data) => this.$emit('analytics-update', data),
+      onTimeSpent: (data) => this.$emit('time-spent', data)
     });
   },
   watch: {
@@ -37,6 +54,11 @@ export const DocViewer = {
     theme(newVal) {
       if (this.viewer && newVal !== this.viewer.theme) {
         this.viewer.toggleTheme();
+      }
+    },
+    bookMode(newVal) {
+      if (this.viewer && this.viewer.isBookMode() !== !!newVal) {
+        this.viewer.setBookMode(!!newVal);
       }
     }
   },

@@ -9,6 +9,7 @@ export const FORMAT_TYPES = {
   AUDIO: 'audio',
   SHEET: 'sheet',
   CODE: 'code',
+  HTML: 'html',
   JSON: 'json',
   YAML: 'yaml',
   XML: 'xml',
@@ -70,13 +71,16 @@ const EXTENSION_MAP = {
   potx: FORMAT_TYPES.PPTX,
   odp: FORMAT_TYPES.PPTX,
 
+  // HTML & Interactive Web Documents
+  html: FORMAT_TYPES.HTML,
+  htm: FORMAT_TYPES.HTML,
+  xhtml: FORMAT_TYPES.HTML,
+
   // Code
   js: FORMAT_TYPES.CODE,
   jsx: FORMAT_TYPES.CODE,
   ts: FORMAT_TYPES.CODE,
   tsx: FORMAT_TYPES.CODE,
-  html: FORMAT_TYPES.CODE,
-  htm: FORMAT_TYPES.CODE,
   css: FORMAT_TYPES.CODE,
   scss: FORMAT_TYPES.CODE,
   py: FORMAT_TYPES.CODE,
@@ -170,6 +174,7 @@ export function detectFormat(fileInput) {
 
   // 2. MIME fallback (for extensionless files or remote blobs)
   if (mime) {
+    if (mime === 'text/html' || mime === 'application/xhtml+xml') return { type: FORMAT_TYPES.HTML, ext: ext || 'html', name };
     if (mime.includes('markdown')) return { type: FORMAT_TYPES.MARKDOWN, ext: ext || 'md', name };
     if (mime.startsWith('image/')) return { type: FORMAT_TYPES.IMAGE, ext: ext || 'png', name };
     if (mime.startsWith('video/')) return { type: FORMAT_TYPES.VIDEO, ext: ext || 'mp4', name };

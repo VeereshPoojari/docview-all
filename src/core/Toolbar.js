@@ -16,7 +16,8 @@ export const ICONS = {
   check: '<svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"></polyline></svg>',
   close: '<svg viewBox="0 0 24 24"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>',
   chevronLeft: '<svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"></polyline></svg>',
-  chevronRight: '<svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>'
+  chevronRight: '<svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"></polyline></svg>',
+  book: '<svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path></svg>'
 };
 
 /**
@@ -86,17 +87,23 @@ export class Toolbar {
 
     const leftDividerHtml = (this.options.browse || this.options.cloudUrl) ? `<div class="dva-divider"></div>` : '';
 
+    const bookModeHtml = `
+      <button class="dva-btn dva-btn-book ${this.viewer && this.viewer.isBookMode && this.viewer.isBookMode() ? 'active' : ''}" id="dva-btn-book-mode" title="Toggle Book Reading Mode (Two-Page Spread)" style="display: none;">
+        ${ICONS.book}
+      </button>
+    `;
+
     const paginationHtml = this.options.pagination ? `
       <div class="dva-pagination-controls" id="dva-pagination-controls" style="display: none;">
+        ${bookModeHtml}
         <button class="dva-btn dva-btn-page" id="dva-btn-prev-page" title="Previous Page (← or PgUp)">
           ${ICONS.chevronLeft}
         </button>
         <div class="dva-page-box" title="Current Page / Total Pages (Enter page number and press Enter to jump)">
           <input 
-            type="number" 
+            type="text" 
             class="dva-page-input" 
             id="dva-page-input" 
-            min="1" 
             value="1" 
             aria-label="Current Page Number" 
           />
@@ -120,7 +127,7 @@ export class Toolbar {
       <button class="dva-btn" id="dva-btn-rotate" title="Rotate 90°">${ICONS.rotateRight}</button>
     ` : '';
 
-    const rightDividerHtml = ((this.options.zoom || this.options.rotate) && (this.options.theme || this.options.fullscreen || this.options.download)) ? `<div class="dva-divider"></div>` : '';
+    const rightDividerHtml = ((this.options.zoom || this.options.rotate) && (this.options.theme || this.options.fullscreen || this.options.download)) ? `<div class="dva-divider" id="dva-tools-divider"></div>` : '';
 
     const themeHtml = this.options.theme ? `
       <button class="dva-btn" id="dva-btn-theme" title="Toggle Theme">${this.viewer.theme === 'dark' ? ICONS.sun : ICONS.moon}</button>
@@ -177,6 +184,11 @@ export class Toolbar {
     `;
 
     this.bindEvents();
+    this.updateEngineCapabilities(
+      this.viewer ? this.viewer.activeEngine : null,
+      this.viewer ? this.viewer.currentFileInfo : null,
+      this.viewer ? this.viewer.totalPages : 1
+    );
   }
 
   bindEvents() {
@@ -240,6 +252,16 @@ export class Toolbar {
     if (btnFs) btnFs.onclick = () => this.viewer.toggleFullscreen();
     if (btnDl) btnDl.onclick = () => this.viewer.download();
 
+    // Book Mode Toggle Event
+    const btnBookMode = this.element.querySelector('#dva-btn-book-mode');
+    if (btnBookMode) {
+      btnBookMode.onclick = () => {
+        if (this.viewer && typeof this.viewer.toggleBookMode === 'function') {
+          this.viewer.toggleBookMode();
+        }
+      };
+    }
+
     // Pagination Events (Previous, Next, Direct Number Jump)
     const btnPrev = this.element.querySelector('#dva-btn-prev-page');
     const btnNext = this.element.querySelector('#dva-btn-next-page');
@@ -279,13 +301,14 @@ export class Toolbar {
     }
   }
 
-  updatePagination(currentPage, totalPages) {
+  updatePagination(currentPage, totalPages, displayLabel = null) {
     if (!this.element) return;
     const paginationControls = this.element.querySelector('#dva-pagination-controls');
     const pageInput = this.element.querySelector('#dva-page-input');
     const pageTotal = this.element.querySelector('#dva-page-total');
     const btnPrev = this.element.querySelector('#dva-btn-prev-page');
     const btnNext = this.element.querySelector('#dva-btn-next-page');
+    const btnBookMode = this.element.querySelector('#dva-btn-book-mode');
 
     if (!paginationControls) return;
 
@@ -295,9 +318,23 @@ export class Toolbar {
       paginationControls.style.display = 'none';
     }
 
+    // Book Mode is strictly for engines that implement setBookMode (PDF, DOCX) and have > 1 page
+    const supportsBookMode = Boolean(
+      this.viewer &&
+      this.viewer.activeEngine &&
+      typeof this.viewer.activeEngine.setBookMode === 'function' &&
+      totalPages > 1
+    );
+
+    if (btnBookMode) {
+      btnBookMode.style.display = supportsBookMode ? 'inline-flex' : 'none';
+      if (supportsBookMode && typeof this.viewer.activeEngine.isBookMode === 'function') {
+        btnBookMode.classList.toggle('active', !!this.viewer.activeEngine.isBookMode());
+      }
+    }
+
     if (pageInput) {
-      pageInput.value = currentPage;
-      pageInput.max = totalPages;
+      pageInput.value = displayLabel ? displayLabel : currentPage;
     }
     if (pageTotal) {
       pageTotal.textContent = totalPages;
@@ -312,11 +349,80 @@ export class Toolbar {
     }
   }
 
+  updateBookMode(isBook) {
+    if (!this.element) return;
+    const btnBookMode = this.element.querySelector('#dva-btn-book-mode');
+    if (btnBookMode) {
+      btnBookMode.classList.toggle('active', !!isBook);
+      btnBookMode.title = isBook ? 'Switch to Continuous Scroll Mode' : 'Switch to Two-Page Book Mode';
+    }
+  }
+
   hidePagination() {
     if (!this.element) return;
     const paginationControls = this.element.querySelector('#dva-pagination-controls');
     if (paginationControls) {
       paginationControls.style.display = 'none';
+    }
+    const btnBookMode = this.element.querySelector('#dva-btn-book-mode');
+    if (btnBookMode) {
+      btnBookMode.style.display = 'none';
+    }
+  }
+
+  updateEngineCapabilities(engine = null, fileInfo = null, totalPages = null) {
+    if (!this.element) return;
+
+    const info = fileInfo || this.viewer?.currentFileInfo;
+    const type = info?.type || '';
+    const activeEngine = engine || this.viewer?.activeEngine;
+    const numPages = totalPages !== null && totalPages !== undefined ? totalPages : (this.viewer?.totalPages || 1);
+
+    const btnBookMode = this.element.querySelector('#dva-btn-book-mode');
+    const paginationControls = this.element.querySelector('#dva-pagination-controls');
+    const btnZoomIn = this.element.querySelector('#dva-btn-zoom-in');
+    const btnZoomOut = this.element.querySelector('#dva-btn-zoom-out');
+    const zoomLevel = this.element.querySelector('#dva-zoom-level');
+    const btnRotate = this.element.querySelector('#dva-btn-rotate');
+    const toolsDivider = this.element.querySelector('#dva-tools-divider');
+
+    // 1. Book Mode: Only when engine explicitly supports it (PDF, DOCX) and totalPages > 1
+    const supportsBookMode = Boolean(
+      activeEngine &&
+      typeof activeEngine.setBookMode === 'function' &&
+      numPages > 1
+    );
+    if (btnBookMode) {
+      btnBookMode.style.display = supportsBookMode ? 'inline-flex' : 'none';
+      if (supportsBookMode && typeof activeEngine.isBookMode === 'function') {
+        btnBookMode.classList.toggle('active', !!activeEngine.isBookMode());
+      }
+    }
+
+    // 2. Pagination: Only when totalPages > 1
+    if (paginationControls) {
+      paginationControls.style.display = numPages > 1 ? 'flex' : 'none';
+    }
+
+    // 3. Zoom: Enabled for all visual documents, code, images, spreadsheets, diagrams.
+    // Hidden for audio and video media players.
+    const noZoomTypes = ['audio', 'video'];
+    const canZoom = this.options.zoom && !noZoomTypes.includes(type) && type !== '';
+    if (btnZoomIn) btnZoomIn.style.display = canZoom ? 'inline-flex' : 'none';
+    if (btnZoomOut) btnZoomOut.style.display = canZoom ? 'inline-flex' : 'none';
+    if (zoomLevel) zoomLevel.style.display = canZoom ? 'inline-block' : 'none';
+
+    // 4. Rotate: Enabled for reading documents, images, and diagrams.
+    // Hidden for audio, video, spreadsheets, and code/text where rotating is invalid or distorts layouts.
+    const rotateSupportedTypes = ['pdf', 'docx', 'image', 'diagram'];
+    const canRotate = this.options.rotate && rotateSupportedTypes.includes(type);
+    if (btnRotate) {
+      btnRotate.style.display = canRotate ? 'inline-flex' : 'none';
+    }
+
+    // 5. Tools Divider: Show if Zoom or Rotate is visible
+    if (toolsDivider) {
+      toolsDivider.style.display = (canZoom || canRotate) ? 'block' : 'none';
     }
   }
 

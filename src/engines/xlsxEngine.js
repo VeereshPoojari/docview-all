@@ -216,6 +216,14 @@ export class XlsxEngine {
 
     this.parseSheetXml(sheetXml);
     this.renderTableView();
+
+    if (this.viewer && typeof this.viewer.setPageInfo === 'function') {
+      this.viewer.setPageInfo(this.currentSheetIndex + 1, this.sheets.length);
+    }
+  }
+
+  goToPage(pageNumber) {
+    this.loadSheet(Math.max(0, Math.min(this.sheets.length - 1, (parseInt(pageNumber, 10) || 1) - 1)));
   }
 
   colLetterToIndex(colStr) {
@@ -623,6 +631,21 @@ export class XlsxEngine {
     this.tableScrollContainer = scrollContainer;
     this.tableScrollListener = renderRows;
     renderRows();
+
+    // Ctrl + Wheel to zoom spreadsheet in/out smoothly
+    if (this.container) {
+      this.container.addEventListener('wheel', (e) => {
+        if (e.ctrlKey || e.metaKey) {
+          e.preventDefault();
+          const delta = e.deltaY < 0 ? 0.15 : -0.15;
+          if (this.viewer && typeof this.viewer.zoom === 'function') {
+            this.viewer.zoom(delta);
+          }
+        }
+      }, { passive: false });
+    }
+
+    this.updateTransform();
   }
 
   escape(str) {
@@ -634,7 +657,37 @@ export class XlsxEngine {
       .replace(/"/g, '&quot;');
   }
 
-  updateTransform() {}
+  updateTransform() {
+    if (!this.container) return;
+    const table = this.container.querySelector('#xlsx-main-table');
+    if (!table) return;
+
+    const scale = this.viewer.scale || 1.0;
+    const rotation = (this.viewer.rotation || 0) % 360;
+
+    // Use CSS zoom for crisp spreadsheet cells, formula bar coordinates and grid scaling
+    if ('zoom' in table.style) {
+      table.style.zoom = `${scale}`;
+    } else {
+      table.style.transformOrigin = 'top left';
+      table.style.transform = `scale(${scale})`;
+    }
+
+    if (rotation !== 0) {
+      table.style.transformOrigin = 'center center';
+      table.style.transform = `rotate(${rotation}deg)`;
+    } else if (!('zoom' in table.style)) {
+      table.style.transformOrigin = 'top left';
+      table.style.transform = `scale(${scale})`;
+    } else {
+      table.style.transform = 'none';
+    }
+
+    // Re-trigger row render to update visible rows with new scale
+    if (typeof this.tableScrollListener === 'function') {
+      this.tableScrollListener();
+    }
+  }
 
   destroy() {
     if (this.tableScrollContainer && this.tableScrollListener) {

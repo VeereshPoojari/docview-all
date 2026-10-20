@@ -5,6 +5,7 @@ import { VideoEngine } from '../engines/videoEngine.js';
 import { CsvEngine } from '../engines/csvEngine.js';
 import { XlsxEngine } from '../engines/xlsxEngine.js';
 import { CodeEngine } from '../engines/codeEngine.js';
+import { HtmlEngine } from '../engines/htmlEngine.js';
 import { JsonEngine } from '../engines/jsonEngine.js';
 import { MarkdownEngine } from '../engines/markdownEngine.js';
 import { PdfEngine } from '../engines/pdfEngine.js';
@@ -16,6 +17,7 @@ import { YamlEngine } from '../engines/yamlEngine.js';
 import { XmlEngine } from '../engines/xmlEngine.js';
 import { PptxEngine } from '../engines/pptxEngine.js';
 import { FallbackEngine } from '../engines/fallbackEngine.js';
+import { AnalyticsEngine } from '../utils/analyticsEngine.js';
 
 export class DocViewer {
   constructor(target, options = {}) {
@@ -41,6 +43,8 @@ export class DocViewer {
     this.toastContainer = null;
     this.loaderOverlay = null;
     this._progressInterval = null;
+
+    this.analytics = new AnalyticsEngine(this, options);
 
     this.init();
     this.bindKeyboardShortcuts();
@@ -123,6 +127,8 @@ export class DocViewer {
     this.currentFileInfo = { name: 'No document loaded', ext: 'READY' };
     if (this.toolbar) {
       this.toolbar.updateFileInfo(this.currentFileInfo);
+      this.toolbar.hidePagination();
+      this.toolbar.updateEngineCapabilities(null, this.currentFileInfo, 1);
     }
 
     const toolbarOpt = this.options.toolbar !== undefined ? this.options.toolbar : this.options.showToolbar;
@@ -194,6 +200,7 @@ export class DocViewer {
             <span class="dva-format-pill">🏷️ XML</span>
             <span class="dva-format-pill">⚙️ YAML</span>
             <span class="dva-format-pill">📦 JSON</span>
+            <span class="dva-format-pill">🌐 HTML</span>
             <span class="dva-format-pill">💻 CODE</span>
             <span class="dva-format-pill">🎵 AUDIO</span>
             <span class="dva-format-pill">🎬 VIDEO</span>
@@ -330,6 +337,11 @@ export class DocViewer {
     // Detect format
     this.currentFileInfo = detectFormat(fileInput);
 
+    if (this.analytics) {
+      this.analytics.setDocumentInfo(this.currentFileInfo);
+      this.analytics.setPage(1, 1);
+    }
+
     // Initial progress loader with percentage
     const extLabel = (this.currentFileInfo.ext || 'doc').toUpperCase();
     this.showProgress(12, `Initializing ${extLabel} engine...`);
@@ -385,6 +397,9 @@ export class DocViewer {
       case FORMAT_TYPES.CODE:
         this.activeEngine = new CodeEngine(this);
         break;
+      case FORMAT_TYPES.HTML:
+        this.activeEngine = new HtmlEngine(this);
+        break;
       case FORMAT_TYPES.JSON:
         this.activeEngine = new JsonEngine(this);
         break;
@@ -425,6 +440,10 @@ export class DocViewer {
       this.notify(`Failed to load: ${err.message || 'Unknown error'}`, 'error');
     } finally {
       this.hideProgress();
+    }
+
+    if (this.toolbar) {
+      this.toolbar.updateEngineCapabilities(this.activeEngine, this.currentFileInfo, this.totalPages);
     }
 
     this.notify(`Opened ${this.currentFileInfo.name} (${(this.currentFileInfo.ext || '').toUpperCase()})`, 'success');
@@ -511,11 +530,14 @@ export class DocViewer {
 
   // --- Page Navigation for Paginated Documents (PDF, DOCX) ---
 
-  setPageInfo(currentPage, totalPages) {
+  setPageInfo(currentPage, totalPages, displayLabel = null) {
     this.currentPage = Math.max(1, parseInt(currentPage, 10) || 1);
     this.totalPages = Math.max(1, parseInt(totalPages, 10) || 1);
     if (this.toolbar) {
-      this.toolbar.updatePagination(this.currentPage, this.totalPages);
+      this.toolbar.updatePagination(this.currentPage, this.totalPages, displayLabel);
+    }
+    if (this.analytics) {
+      this.analytics.setPage(this.currentPage, this.totalPages);
     }
   }
 
@@ -525,21 +547,213 @@ export class DocViewer {
     if (this.toolbar) {
       this.toolbar.updatePagination(this.currentPage, this.totalPages);
     }
+    if (this.analytics) {
+      this.analytics.setPage(this.currentPage, this.totalPages);
+    }
     if (this.activeEngine && typeof this.activeEngine.goToPage === 'function') {
       this.activeEngine.goToPage(target);
     }
   }
 
   nextPage() {
+    if (this.isBookMode()) {
+      if (this.activeEngine && typeof this.activeEngine.nextSpread === 'function') {
+        this.activeEngine.nextSpread();
+        return;
+      }
+      if (this.currentPage + 2 <= this.totalPages) {
+        this.goToPage(this.currentPage + 2);
+        return;
+      }
+    }
     if (this.currentPage < this.totalPages) {
       this.goToPage(this.currentPage + 1);
     }
   }
 
   prevPage() {
+    if (this.isBookMode()) {
+      if (this.activeEngine && typeof this.activeEngine.prevSpread === 'function') {
+        this.activeEngine.prevSpread();
+        return;
+      }
+      if (this.currentPage > 2) {
+        this.goToPage(this.currentPage - 2);
+        return;
+      }
+    }
     if (this.currentPage > 1) {
       this.goToPage(this.currentPage - 1);
     }
+  }
+
+  // --- Book Mode Reading Mode Accessors ---
+
+  isBookMode() {
+    if (this.activeEngine && typeof this.activeEngine.isBookMode === 'function') {
+      return this.activeEngine.isBookMode();
+    }
+    return !!this.options.bookMode;
+  }
+
+  setBookMode(enabled) {
+    const nextMode = !!enabled;
+    this.options.bookMode = nextMode;
+    if (this.toolbar && typeof this.toolbar.updateBookMode === 'function') {
+      this.toolbar.updateBookMode(nextMode);
+    }
+    if (this.activeEngine && typeof this.activeEngine.setBookMode === 'function') {
+      this.activeEngine.setBookMode(nextMode);
+    }
+    return this;
+  }
+
+  toggleBookMode() {
+    return this.setBookMode(!this.isBookMode());
+  }
+
+  // --- Document & Media Analytics Accessors (Get & Set) ---
+
+  getAnalytics() {
+    return this.analytics ? this.analytics.getAnalytics() : null;
+  }
+
+  setAnalytics(data) {
+    if (this.analytics) {
+      this.analytics.setAnalytics(data);
+      if (this.activeEngine && typeof this.activeEngine.updateWatchTelemetryBadge === 'function') {
+        this.activeEngine.updateWatchTelemetryBadge();
+      }
+    }
+    return this;
+  }
+
+  getTimeSpent() {
+    return this.analytics ? this.analytics.getTimeSpent() : null;
+  }
+
+  setTimeSpent(data) {
+    if (this.analytics) {
+      this.analytics.setTimeSpent(data);
+      if (this.activeEngine && typeof this.activeEngine.updateWatchTelemetryBadge === 'function') {
+        this.activeEngine.updateWatchTelemetryBadge();
+      }
+    }
+    return this;
+  }
+
+  resetAnalytics() {
+    if (this.analytics) {
+      this.analytics.resetAnalytics();
+      if (this.activeEngine && typeof this.activeEngine.updateWatchTelemetryBadge === 'function') {
+        this.activeEngine.updateWatchTelemetryBadge();
+      }
+    }
+    return this;
+  }
+
+  getWatchedIntervals() {
+    return this.analytics ? this.analytics.getWatchedIntervals() : [];
+  }
+
+  setWatchedIntervals(intervals) {
+    if (this.analytics) {
+      this.analytics.setWatchedIntervals(intervals);
+      if (this.activeEngine && typeof this.activeEngine.updateWatchTelemetryBadge === 'function') {
+        this.activeEngine.updateWatchTelemetryBadge();
+      }
+    }
+    return this;
+  }
+
+  // --- Transcript & Subtitles Accessors (Get & Set) ---
+
+  getTranscript() {
+    if (this.activeEngine && typeof this.activeEngine.getTranscript === 'function') {
+      return this.activeEngine.getTranscript();
+    }
+    return [];
+  }
+
+  async setTranscript(input) {
+    this.options.transcript = input;
+    if (this.activeEngine && typeof this.activeEngine.setTranscript === 'function') {
+      return await this.activeEngine.setTranscript(input);
+    }
+    return [];
+  }
+
+  // --- HTML Preview / Code Mode Accessors (Get & Set) ---
+
+  getHtmlMode() {
+    if (this.activeEngine && 'viewMode' in this.activeEngine) {
+      return this.activeEngine.viewMode;
+    }
+    return this.options.htmlViewMode || this.options.htmlMode || 'both';
+  }
+
+  setHtmlMode(mode) {
+    this.options.htmlViewMode = mode;
+    this.options.htmlMode = mode;
+    if (this.activeEngine && typeof this.activeEngine.updateViewMode === 'function') {
+      this.activeEngine.updateViewMode(mode);
+    }
+    return this;
+  }
+
+  // --- Page Navigation Accessors (Get & Set) ---
+
+  getPage() {
+    return this.currentPage;
+  }
+
+  setPage(pageNumber) {
+    this.goToPage(pageNumber);
+    return this;
+  }
+
+  getTotalPages() {
+    return this.totalPages;
+  }
+
+  // --- Zoom & Rotation Accessors (Get & Set) ---
+
+  getZoom() {
+    return this.scale;
+  }
+
+  setZoom(scale) {
+    this.scale = Math.max(0.2, Math.min(5.0, parseFloat(scale) || 1.0));
+    if (this.toolbar) {
+      this.toolbar.updateZoom(this.scale);
+    }
+    if (this.activeEngine && typeof this.activeEngine.updateTransform === 'function') {
+      this.activeEngine.updateTransform();
+    }
+    return this;
+  }
+
+  getRotation() {
+    return this.rotation;
+  }
+
+  setRotation(degrees) {
+    this.rotation = (parseInt(degrees, 10) || 0) % 360;
+    if (this.activeEngine && typeof this.activeEngine.updateTransform === 'function') {
+      this.activeEngine.updateTransform();
+    }
+    return this;
+  }
+
+  getTheme() {
+    return this.theme;
+  }
+
+  setTheme(theme) {
+    if (theme && (theme === 'dark' || theme === 'light') && this.theme !== theme) {
+      this.toggleTheme();
+    }
+    return this;
   }
 
   bindKeyboardShortcuts() {
@@ -563,6 +777,10 @@ export class DocViewer {
     if (this.keyHandler) {
       window.removeEventListener('keydown', this.keyHandler);
       this.keyHandler = null;
+    }
+    if (this.analytics) {
+      this.analytics.destroy();
+      this.analytics = null;
     }
     if (this.activeEngine && typeof this.activeEngine.destroy === 'function') {
       this.activeEngine.destroy();

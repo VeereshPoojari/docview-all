@@ -705,6 +705,33 @@ export class YamlEngine {
     }
   }
 
+  updateTransform() {
+    if (!this.container) return;
+    const scale = this.viewer.scale || 1.0;
+    const rotation = (this.viewer.rotation || 0) % 360;
+
+    const target = this.container.querySelector('.dva-yaml-card') || 
+                   this.container.querySelector('.dva-yaml-table') || 
+                   this.container.querySelector('.dva-yaml-raw-card');
+    if (target) {
+      if ('zoom' in target.style) {
+        target.style.zoom = `${scale}`;
+      } else {
+        target.style.transformOrigin = 'top center';
+        target.style.transform = `scale(${scale})`;
+      }
+
+      if (rotation !== 0) {
+        target.style.transformOrigin = 'center center';
+        target.style.transform = `rotate(${rotation}deg)`;
+      } else if (!('zoom' in target.style)) {
+        target.style.transform = `scale(${scale})`;
+      } else {
+        target.style.transform = 'none';
+      }
+    }
+  }
+
   destroy() {
     this.container = null;
     this.parsedData = null;
